@@ -1,0 +1,320 @@
+package com.deeptek.ai.idea.ui.chat
+
+import com.deeptek.ai.idea.agent.AgentContext
+import com.deeptek.ai.idea.agent.AgentEvent
+import com.deeptek.ai.idea.agent.AgentExecutor
+import com.deeptek.ai.idea.agent.AgentFactory
+import com.deeptek.ai.idea.llm.ChatMessage
+import com.deeptek.ai.idea.llm.LlmException
+import com.deeptek.ai.idea.llm.LlmProviderFactory
+import com.intellij.openapi.application.invokeLater
+import com.intellij.openapi.diagnostic.Logger
+import com.intellij.openapi.project.Project
+import com.intellij.ui.JBColor
+import com.intellij.ui.components.JBScrollPane
+import com.intellij.util.ui.JBUI
+import kotlinx.coroutines.*
+import kotlinx.coroutines.flow.catch
+import java.awt.BorderLayout
+import java.awt.Dimension
+import java.awt.Font
+import java.awt.event.KeyAdapter
+import java.awt.event.KeyEvent
+import javax.swing.*
+import javax.swing.text.html.HTMLEditorKit
+
+/**
+ * Chat 面板 — 支持普通对话 + Agent 模式
+ *
+ * 基于 Swing 的 Chat 界面，包含：
+ * - 消息显示区域（HTML 渲染）
+ * - 输入框 + 发送按钮
+ * - 模式切换（Chat / Agent）
+ * - Agent 工具调用过程实时展示
+ */
+class ChatPanel(private val project: Project) {
+
+    private val logger = Logger.getInstance(ChatPanel::class.java)
+
+    // 对话历史（普通 Chat 模式）
+    private val messages = mutableListOf<ChatMessage>()
+    private val systemPrompt = ChatMessage.system(
+        """你是 CodeSense AI，一个专业的代码助手。你运行在 IntelliJ IDEA 插件中。
+你的职责是帮助开发者理解代码、审查代码、分析代码影响范围。
+请使用中文回答。回答要专业、简洁、有条理。"""
+    )
+
+    // Agent 上下文
+    private var agentContext: AgentContext? = null
+    private var isAgentMode = false
+
+    // UI 组件
+    private val rootPanel = JPanel(BorderLayout())
+    private val messageDisplay: JEditorPane
+    private val inputField: JTextArea
+    private val sendButton: JButton
+    private val statusLabel: JLabel
+    private val modeToggle: JToggleButton
+
+    // HTML 内容拼接
+    private val htmlContent = StringBuilder()
+
+    // 协程
+    private val scope = CoroutineScope(Dispatchers.Default + SupervisorJob())
+    private var currentJob: Job? = null
+
+    init {
+        // 消息显示区域
+        messageDisplay = JEditorPane().apply {
+            isEditable = false
+            contentType = "text/html"
+            editorKit = com.deeptek.ai.idea.ui.ThemeAwareCss.createChatEditorKit()
+        }
+        updateDisplay()
+
+        val scrollPane = JBScrollPane(messageDisplay).apply {
+            verticalScrollBarPolicy = ScrollPaneConstants.VERTICAL_SCROLLBAR_AS_NEEDED
+            horizontalScrollBarPolicy = ScrollPaneConstants.HORIZONTAL_SCROLLBAR_NEVER
+        }
+
+        // 输入区域
+        inputField = JTextArea(3, 0).apply {
+            lineWrap = true
+            wrapStyleWord = true
+            font = Font("Microsoft YaHei", Font.PLAIN, 13)
+            border = JBUI.Borders.empty(8)
+            addKeyListener(object : KeyAdapter() {
+                override fun keyPressed(e: KeyEvent) {
+                    if (e.keyCode == KeyEvent.VK_ENTER && !e.isShiftDown) {
+                        e.consume()
+                        onSend()
+                    }
+                }
+            })
+        }
+
+        sendButton = JButton("发送").apply { addActionListener { onSend() } }
+
+        statusLabel = JLabel(" ").apply {
+            foreground = JBColor.GRAY
+            font = font.deriveFont(11f)
+            border = JBUI.Borders.emptyLeft(8)
+        }
+
+        modeToggle = JToggleButton("🤖 Agent").apply {
+            toolTipText = "切换 Agent 模式（启用工具调用）"
+            addActionListener {
+                isAgentMode = isSelected
+                statusLabel.text = if (isAgentMode) "Agent 模式（可使用工具）" else " "
+            }
+        }
+
+        // 底部布局
+        val buttonPanel = JPanel().apply {
+            layout = BoxLayout(this, BoxLayout.X_AXIS)
+            border = JBUI.Borders.empty(4)
+            add(modeToggle)
+            add(Box.createHorizontalGlue())
+            add(sendButton)
+        }
+
+        val inputPanel = JPanel(BorderLayout()).apply {
+            add(statusLabel, BorderLayout.NORTH)
+            add(JBScrollPane(inputField).apply { preferredSize = Dimension(0, 80) }, BorderLayout.CENTER)
+            add(buttonPanel, BorderLayout.SOUTH)
+        }
+
+        rootPanel.apply {
+            add(scrollPane, BorderLayout.CENTER)
+            add(inputPanel, BorderLayout.SOUTH)
+        }
+
+        messages.add(systemPrompt)
+    }
+
+    fun getComponent(): JComponent = rootPanel
+
+    private fun onSend() {
+        val text = inputField.text?.trim() ?: return
+        if (text.isEmpty()) return
+
+        inputField.text = ""
+        inputField.isEnabled = false
+        sendButton.isEnabled = false
+
+        appendUserMessage(text)
+
+        if (isAgentMode) {
+            onSendAgent(text)
+        } else {
+            onSendChat(text)
+        }
+    }
+
+    // ====== 普通 Chat 模式 ======
+
+    private fun onSendChat(text: String) {
+        messages.add(ChatMessage.user(text))
+
+        currentJob = scope.launch {
+            try {
+                setStatus("AI 正在思考...")
+                val provider = LlmProviderFactory.createDefault()
+                val responseBuilder = StringBuilder()
+                startAiMessage()
+
+                provider.chatCompletionStream(messages)
+                    .catch { e ->
+                        logger.error("Stream error", e)
+                        appendErrorMessage("请求失败: ${e.message}")
+                    }
+                    .collect { chunk ->
+                        chunk.deltaContent?.let {
+                            responseBuilder.append(it)
+                            appendAiChunk(it)
+                        }
+                    }
+
+                finishAiMessage()
+                val fullResponse = responseBuilder.toString()
+                if (fullResponse.isNotEmpty()) {
+                    messages.add(ChatMessage.assistant(fullResponse))
+                }
+                setStatus(" ")
+            } catch (e: LlmException) {
+                appendErrorMessage(e.message ?: "未知错误")
+                setStatus("发送失败")
+            } catch (e: Exception) {
+                appendErrorMessage("发生错误: ${e.message}")
+                setStatus("发送失败")
+            } finally {
+                enableInput()
+            }
+        }
+    }
+
+    // ====== Agent 模式 ======
+
+    private fun onSendAgent(text: String) {
+        currentJob = scope.launch {
+            try {
+                setStatus("🤖 Agent 正在工作...")
+                val provider = LlmProviderFactory.createDefault()
+                val toolRegistry = AgentFactory.createToolRegistry()
+                val executor = AgentExecutor(provider, toolRegistry, project)
+
+                if (agentContext == null) {
+                    agentContext = AgentContext()
+                }
+
+                executor.execute(text, agentContext!!).collect { event ->
+                    when (event) {
+                        is AgentEvent.Thinking -> {
+                            appendToolMessage("💭 思考", event.text)
+                        }
+                        is AgentEvent.ToolCallStart -> {
+                            appendToolMessage("🔧 调用工具", "${event.toolName}(${event.arguments.take(100)}...)")
+                        }
+                        is AgentEvent.ToolCallResult -> {
+                            val preview = event.result.take(200)
+                            appendToolMessage("✅ ${event.toolName}", "$preview (${event.durationMs}ms)")
+                        }
+                        is AgentEvent.FinalChunk -> {
+                            appendAiChunk(event.text)
+                        }
+                        is AgentEvent.Done -> {
+                            finishAiMessage()
+                            setStatus("Agent 完成 (${event.totalRounds} 轮)")
+                        }
+                        is AgentEvent.Error -> {
+                            appendErrorMessage(event.message)
+                            setStatus("Agent 执行失败")
+                        }
+                    }
+                }
+            } catch (e: Exception) {
+                appendErrorMessage("Agent 错误: ${e.message}")
+                setStatus("Agent 执行失败")
+            } finally {
+                enableInput()
+            }
+        }
+    }
+
+    // ====== HTML 渲染 ======
+
+    private fun updateDisplay() {
+        invokeLater {
+            messageDisplay.text = buildHtml("""
+                <div class="ai-msg">
+                    <div class="ai-role">🤖 CodeSense AI</div>
+                    你好！我是 CodeSense AI，你的代码助手。<br>
+                    开启右下角 <b>🤖 Agent</b> 可让 AI 自主使用工具完成复杂任务。
+                </div>
+            """.trimIndent())
+        }
+    }
+
+    private fun appendUserMessage(text: String) {
+        val escaped = text.replace("<", "&lt;").replace(">", "&gt;").replace("\n", "<br>")
+        htmlContent.append("""<div class="user-msg"><div class="role">👤 You</div>$escaped</div>""")
+        startAiMessage()
+        refreshDisplay()
+    }
+
+    private fun appendToolMessage(label: String, content: String) {
+        val escaped = content.replace("<", "&lt;").replace(">", "&gt;").replace("\n", "<br>")
+        htmlContent.append("""<div class="tool-msg"><div class="tool-role">$label</div>$escaped</div>""")
+        refreshDisplay()
+    }
+
+    private var currentAiHtml = StringBuilder()
+
+    private fun startAiMessage() {
+        currentAiHtml = StringBuilder()
+    }
+
+    private fun appendAiChunk(content: String) {
+        currentAiHtml.append(content.replace("<", "&lt;").replace(">", "&gt;").replace("\n", "<br>"))
+        refreshDisplay(withCurrentAi = true)
+    }
+
+    private fun finishAiMessage() {
+        if (currentAiHtml.isNotEmpty()) {
+            htmlContent.append("""<div class="ai-msg"><div class="ai-role">🤖 CodeSense AI</div>$currentAiHtml</div>""")
+            currentAiHtml = StringBuilder()
+            refreshDisplay()
+        }
+    }
+
+    private fun appendErrorMessage(error: String) {
+        htmlContent.append("""<div class="ai-msg"><div class="error">⚠️ 错误</div>${error.replace("<", "&lt;")}</div>""")
+        refreshDisplay()
+    }
+
+    private fun refreshDisplay(withCurrentAi: Boolean = false) {
+        invokeLater {
+            val aiPart = if (withCurrentAi && currentAiHtml.isNotEmpty()) {
+                """<div class="ai-msg"><div class="ai-role">🤖 CodeSense AI</div>$currentAiHtml</div>"""
+            } else ""
+
+            messageDisplay.text = buildHtml("""
+                <div class="ai-msg"><div class="ai-role">🤖 CodeSense AI</div>你好！开启 Agent 模式可使用工具。</div>
+                $htmlContent $aiPart
+            """.trimIndent())
+            messageDisplay.caretPosition = messageDisplay.document.length
+        }
+    }
+
+    private fun buildHtml(body: String) = "<html><body><div style='padding:8px;'>$body</div></body></html>"
+
+    private fun setStatus(text: String) { invokeLater { statusLabel.text = text } }
+
+    private fun enableInput() {
+        invokeLater {
+            inputField.isEnabled = true
+            sendButton.isEnabled = true
+            inputField.requestFocus()
+        }
+    }
+}

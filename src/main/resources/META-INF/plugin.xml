@@ -1,0 +1,77 @@
+<idea-plugin>
+    <id>com.deeptek.ai.idea</id>
+    <name>CodeSense AI</name>
+    <vendor email="chenping@deeptek.ai" url="https://github.com/chenping">chenp</vendor>
+
+    <description><![CDATA[
+    <h2>CodeSense AI — 代码感知 AI 助手</h2>
+    <p>IntelliJ IDEA 的智能代码助手插件，提供以下能力：</p>
+    <ul>
+        <li><b>代码审查</b>：基于 Git Diff 的 AI 代码 Review</li>
+        <li><b>影响范围分析</b>：自动分析代码修改的调用链和影响范围</li>
+        <li><b>Agent 自主执行</b>：AI 可以自主使用工具完成复杂任务</li>
+        <li><b>多模型支持</b>：支持 MiniMax、GLM、DeepSeek、通义千问等</li>
+    </ul>
+    ]]></description>
+
+    <!-- Platform dependencies -->
+    <depends>com.intellij.modules.platform</depends>
+    <depends>Git4Idea</depends>
+    <depends>com.intellij.java</depends>
+
+    <extensions defaultExtensionNs="com.intellij">
+        <!-- Chat ToolWindow (右侧侧边栏) -->
+        <toolWindow id="CodeSense AI"
+                    anchor="right"
+                    factoryClass="com.deeptek.ai.idea.ui.chat.ChatToolWindowFactory"
+                    icon="/icons/codesense.svg"/>
+
+        <!-- Settings 页面 -->
+        <applicationConfigurable
+            parentId="tools"
+            instance="com.deeptek.ai.idea.settings.CodeSenseSettingsConfigurable"
+            id="com.deeptek.ai.idea.settings"
+            displayName="CodeSense AI"/>
+
+        <!-- 持久化存储服务 -->
+        <applicationService
+            serviceImplementation="com.deeptek.ai.idea.settings.CodeSenseSettings"/>
+
+        <!-- Project-level services -->
+        <projectService
+            serviceImplementation="com.deeptek.ai.idea.git.GitDiffService"/>
+        <projectService
+            serviceImplementation="com.deeptek.ai.idea.analysis.CallHierarchyAnalyzer"/>
+        <projectService
+            serviceImplementation="com.deeptek.ai.idea.review.CodeReviewService"/>
+    </extensions>
+
+    <actions>
+        <!-- 编辑器右键菜单 -->
+        <group id="CodeSense.EditorPopupMenu" text="CodeSense AI" popup="true">
+            <add-to-group group-id="EditorPopupMenu" anchor="last"/>
+            <action id="CodeSense.ExplainCode"
+                    class="com.deeptek.ai.idea.actions.ExplainCodeAction"
+                    text="解释代码"
+                    description="使用 AI 解释选中的代码"/>
+            <action id="CodeSense.ReviewFile"
+                    class="com.deeptek.ai.idea.actions.ReviewFileAction"
+                    text="审查此文件"
+                    description="使用 AI 审查当前文件"/>
+            <action id="CodeSense.AnalyzeImpact"
+                    class="com.deeptek.ai.idea.actions.AnalyzeImpactAction"
+                    text="分析影响范围"
+                    description="分析当前方法的调用链和影响范围"/>
+            <action id="CodeSense.AskCodeSense"
+                    class="com.deeptek.ai.idea.actions.AskCodeSenseAction"
+                    text="咨询 AI"
+                    description="带上选中代码打开 AI 对话"/>
+            <action id="CodeSense.ReviewGitChanges"
+                    class="com.deeptek.ai.idea.actions.ReviewGitChangesAction"
+                    text="审查全量 Git 未提交变更"
+                    description="调用大模型分析本地未提交的所有代码变动">
+                <add-to-group group-id="VcsGroups" anchor="last"/>
+            </action>
+        </group>
+    </actions>
+</idea-plugin>
