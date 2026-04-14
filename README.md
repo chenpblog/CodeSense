@@ -65,14 +65,14 @@ src/main/kotlin/com/deeptek/ai/idea/
 
 所有接入的模型统一采用 **Anthropic Messages API 协议** `(x-api-key 认证)`。无论是国内的高性能大模型（通过各大平台的兼容接口或转换器）还是官方 Claude，只要提供了兼容 Anthropic 的接口全部支持！
 
-| Provider | 协议                   | 推荐模型       | 配置 Base URL 示例                                                   |
-| -------- | ---------------------- | -------------- | -------------------------------------------------------------------- |
-| MiniMax  | Anthropic Messages API | MiniMax-M2.7   | `https://api.minimaxi.com/anthropic/v1/messages`                      |
-| 智谱 GLM | Anthropic Messages API | glm-4.7        | `https://open.bigmodel.cn/api/anthropic/v1/messages`                 |
-| DeepSeek | Anthropic Messages API | deepseek-chat  | 第三方聚合站或 API 网关提供的 Anthropic 兼容端地址                   |
-| 通义千问 | Anthropic Messages API | qwen-max       | 第三方聚合站或 API 网关提供的 Anthropic 兼容端地址                   |
-| Claude   | Anthropic Messages API | claude-3-5-sonnet| `https://api.anthropic.com/v1/messages`                            |
-| 自部署   | Anthropic Messages API | 任意模型       | 通常以 `/v1/messages` 或 `/chat/completions` (依赖中转) 结尾          |
+| Provider | 协议                   | 推荐模型          | 配置 Base URL 示例                                           |
+| -------- | ---------------------- | ----------------- | ------------------------------------------------------------ |
+| MiniMax  | Anthropic Messages API | MiniMax-M2.7      | `https://api.minimaxi.com/anthropic/v1/messages`             |
+| 智谱 GLM | Anthropic Messages API | glm-4.7           | `https://open.bigmodel.cn/api/anthropic/v1/messages`         |
+| DeepSeek | Anthropic Messages API | deepseek-chat     | 第三方聚合站或 API 网关提供的 Anthropic 兼容端地址           |
+| 通义千问 | Anthropic Messages API | qwen-max          | 第三方聚合站或 API 网关提供的 Anthropic 兼容端地址           |
+| Claude   | Anthropic Messages API | claude-3-5-sonnet | `https://api.anthropic.com/v1/messages`                      |
+| 自部署   | Anthropic Messages API | 任意模型          | 通常以 `/v1/messages` 或 `/chat/completions` (依赖中转) 结尾 |
 
 > ⚠️ **Base URL 配置提示**：在 Settings 设置时需要填写**完整的终端地址**，切勿只填域名，**请务必在你的原有地址后面加上 `/v1/messages` 或其他实际对应的 API 终端！**
 
@@ -273,14 +273,45 @@ jobs:
 
 ### 常用 Gradle 命令
 
-| 命令                      | 说明                         |
-| ------------------------- | ---------------------------- |
-| `./gradlew build`         | 编译 + 测试                  |
-| `./gradlew runIde`        | 启动沙箱 IDE（带插件）       |
-| `./gradlew buildPlugin`   | 打包为可分发的 ZIP           |
-| `./gradlew publishPlugin` | 发布到 JetBrains Marketplace |
-| `./gradlew verifyPlugin`  | 验证插件兼容性               |
-| `./gradlew clean`         | 清理构建产物                 |
+| 命令                      | 说明                                                 |
+| ------------------------- | ---------------------------------------------------- |
+| `./gradlew build`         | 编译 + 测试                                          |
+| `./gradlew runIde`        | 启动沙箱 IDE（带插件）                               |
+| `./gradlew buildPlugin`   | 打包为可分发的 ZIP                                   |
+| `./gradlew publishPlugin` | 发布到 JetBrains Marketplace                         |
+| `./gradlew verifyPlugin`  | 验证插件兼容性（详见下方说明）                       |
+| `./gradlew clean`         | 清理构建产物                                         |
+
+### 验证插件兼容性 (verifyPlugin)
+
+在发布插件前，强烈建议验证插件与目标 IntelliJ 版本的兼容性（检查 API 废弃、二进制破坏等）。因为验证过程会下载完整 IDE，**请务必配置好指定的版本后再运行，避免下载过多不需要的 IDE 版本占用大量磁盘空间。**
+
+**1. 配置要验证的版本** (编辑 `build.gradle.kts`)：
+
+```kotlin
+intellijPlatform {
+    pluginVerification {
+        ides {
+            // 验证当前的开发版本（通过属性构建 "IC-2024.3"）
+            val type = providers.gradleProperty("platformType").getOrElse("IC")
+            val ver = providers.gradleProperty("platformVersion").get()
+            ide("$type-$ver")
+            
+            // 可以手动加入需要额外验证的历史或未来特定版本，格式为：<类型>-<版本>
+            // ide("IC-2024.1.4") 
+            // ide("IU-2024.2.3")
+        }
+    }
+}
+```
+
+**2. 运行验证命令**：
+
+```bash
+./gradlew verifyPlugin
+```
+
+> **提示**：运行后，控制台会输出兼容性检查结果，成功即可安心打包发布。如果有不兼容的方法调用，请根据提示进行代码修改。
 
 ### 项目配置文件
 

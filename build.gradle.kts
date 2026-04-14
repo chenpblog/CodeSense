@@ -50,11 +50,18 @@ intellijPlatform {
         }
     }
     
-    // pluginVerification {
-    //     ides {
-    //         recommended()
-    //     }
-    // }
+    // 插件兼容性验证配置 (使用 ./gradlew verifyPlugin 执行)
+    pluginVerification {
+        ides {
+            // 默认验证 gradle.properties 中配置的开发版本
+            val type = providers.gradleProperty("platformType").getOrElse("IC")
+            val ver = providers.gradleProperty("platformVersion").get()
+            ide("$type-$ver")
+            // 你也可以手动添加需要额外验证的特定版本，格式为：<类型>-<版本>
+            // ide("IC-2024.1.4")
+            // ide("IU-2024.2.3")
+        }
+    }
 }
 
 tasks {
