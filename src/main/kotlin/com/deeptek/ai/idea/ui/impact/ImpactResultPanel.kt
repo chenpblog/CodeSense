@@ -18,7 +18,7 @@ import javax.swing.text.html.HTMLEditorKit
  * 在 ToolWindow 中打开一个 Tab 页，展示 Markdown 格式的影响分析报告。
  * 支持：复制 Markdown / 导出 .md 文件 / 重新分析
  */
-class ImpactResultPanel(private val project: Project) {
+class ImpactResultPanel(private val project: Project, private val onClose: (() -> Unit)? = null) {
 
     private val rootPanel = JPanel(BorderLayout())
     private val messageDisplay: JEditorPane
@@ -51,6 +51,11 @@ class ImpactResultPanel(private val project: Project) {
                 addActionListener { exportToFile() }
             })
             add(Box.createHorizontalGlue())
+            if (onClose != null) {
+                add(JButton("❌ 关闭").apply {
+                    addActionListener { onClose.invoke() }
+                })
+            }
         }
 
         rootPanel.add(toolbar, BorderLayout.NORTH)

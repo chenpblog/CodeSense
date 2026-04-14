@@ -153,12 +153,17 @@ object ReportGenerator {
         // 向上调用链总结表
         sb.appendLine("**向上调用链总结：**")
         sb.appendLine()
-        sb.appendLine("| 层级 | 调用者 | 入口类型 | 调用方式 |")
-        sb.appendLine("|------|--------|---------|---------|")
-        val allCallers = flattenTree(biTree.callerTree, 0)
-        allCallers.forEach { (depth, node) ->
-            val entryType = if (node.isEntryPoint) node.entryPointInfo?.type?.displayName ?: "-" else "-"
-            sb.appendLine("| $depth | `${node.method.displayName}` | $entryType | 直接调用 |")
+        sb.appendLine("| 链路编号 | 链路深度 | 最上层调用者 | 入口类型 | 调用方式 |")
+        sb.appendLine("|--------|--------|------------|---------|---------|")
+        val chains = biTree.callerTree.collectChainTrees()
+        chains.forEachIndexed { chainIndex, path ->
+            val topNode = path.last()
+            val entryType = if (topNode.isEntryPoint) {
+                topNode.entryPointInfo?.type?.displayName ?: EntryPointType.OTHER.displayName
+            } else {
+                EntryPointType.OTHER.displayName
+            }
+            sb.appendLine("| ${chainIndex + 1} | ${path.size - 1} | `${topNode.method.displayName}` | $entryType | 直接调用 |")
         }
         sb.appendLine()
         sb.appendLine("---")
@@ -190,13 +195,31 @@ object ReportGenerator {
     private fun generateEntryPointTable(sb: StringBuilder, report: ImpactReport) {
         sb.appendLine("## 三、受影响入口点汇总")
         sb.appendLine()
-        sb.appendLine("| # | 入口类型 | 类.方法 | 路径/触发条件 | AI 说明 | 人工说明 |")
-        sb.appendLine("|---|---------|--------|-------------|---------|---------|")
+        sb.appendLine("| # | 入口类型 | 类.方法 | 路径/触发条件 | AI 说明 |")
+        sb.appendLine("|---|---------|--------|-------------|---------|")
         report.entryPoints.forEachIndexed { index, ep ->
             val typeIcon = ep.type.icon
             val typeName = ep.type.displayName
             val pathOrTrigger = ep.path ?: ep.triggerCondition ?: "-"
-            sb.appendLine("| ${index + 1} | $typeIcon $typeName | `${ep.method.displayName}` | `$pathOrTrigger` | *待 AI 生成* | |")
+
+            // AI 说明三层 fallback：
+            // 1. 有代码注释 → 【注释】标记在前
+            // 2. AI 已生成 → 【AI】标记在前
+            // 3. 均无 → 显示"待 AI 生成"
+            val aiExplanation = when {
+                !ep.codeComment.isNullOrBlank() && (ep.aiExplanation.isNullOrBlank() || ep.aiExplanation == "暂无特别说明") ->
+                    "【注释】${ep.codeComment}"
+                !ep.aiExplanation.isNullOrBlank() && ep.aiExplanation != "暂无特别说明" -> {
+                    if (!ep.codeComment.isNullOrBlank()) {
+                        "【注释】${ep.codeComment}；【AI】${ep.aiExplanation}"
+                    } else {
+                        "【AI】${ep.aiExplanation}"
+                    }
+                }
+                else -> "*待 AI 生成*"
+            }
+
+            sb.appendLine("| ${index + 1} | $typeIcon $typeName | `${ep.method.displayNameWithLine}` | `$pathOrTrigger` | $aiExplanation |")
         }
         sb.appendLine()
         sb.appendLine("---")

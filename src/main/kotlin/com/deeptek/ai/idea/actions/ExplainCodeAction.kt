@@ -34,7 +34,7 @@ class ExplainCodeAction : AnAction() {
         val fileName = e.getData(CommonDataKeys.VIRTUAL_FILE)?.name ?: "unknown"
 
         val panel = ReviewToolWindowManager.openReviewTab(project, "💡 解释: $fileName")
-        panel.appendHtml("<b>正在解释选中的代码...</b><br><br>")
+        panel.appendMarkdown("**正在解释选中的代码...**\n\n")
 
         CoroutineScope(Dispatchers.Default).launch {
             try {

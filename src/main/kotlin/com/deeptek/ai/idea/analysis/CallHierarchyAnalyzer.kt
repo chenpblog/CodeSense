@@ -219,6 +219,17 @@ fun PsiMethod.toMethodInfo(): MethodInfo {
     val paramTypes = this.parameterList.parameters
         .joinToString(", ") { it.type.presentableText }
 
+    // 提取 JavaDoc/KDoc 注释首行摘要
+    val docComment = this.docComment?.text?.let { raw ->
+        raw.removePrefix("/**")
+            .removeSuffix("*/")
+            .lines()
+            .map { it.trim().removePrefix("*").trim() }
+            .filter { it.isNotBlank() && !it.startsWith("@") }
+            .firstOrNull()
+            ?.take(80)
+    }
+
     return MethodInfo(
         className = containingClass?.name ?: "Unknown",
         methodName = this.name,
@@ -230,6 +241,7 @@ fun PsiMethod.toMethodInfo(): MethodInfo {
         packageName = (containingClass?.qualifiedName ?: "").substringBeforeLast('.', ""),
         annotations = this.annotations.mapNotNull {
             it.qualifiedName?.substringAfterLast('.')
-        }
+        },
+        docComment = docComment
     )
 }

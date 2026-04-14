@@ -125,9 +125,16 @@ class AnthropicCompatProvider(private val config: ProviderConfig) : LlmProvider 
             withContext(Dispatchers.IO) {
                 var currentEvent = ""
                 var line: String?
+                var lineCount = 0
 
                 while (reader.readLine().also { line = it } != null) {
                     val data = line ?: continue
+                    lineCount++
+
+                    // 前 20 行打印原始内容以便调试
+                    if (lineCount <= 20) {
+                        logger.info("[SSE] 第${lineCount}行原始数据: '$data'")
+                    }
 
                     // Anthropic SSE 格式:
                     // event: content_block_delta
@@ -135,6 +142,7 @@ class AnthropicCompatProvider(private val config: ProviderConfig) : LlmProvider 
                     when {
                         data.startsWith("event: ") -> {
                             currentEvent = data.removePrefix("event: ").trim()
+                            if (lineCount <= 20) logger.info("[SSE] event=$currentEvent")
                         }
                         data.startsWith("data: ") -> {
                             val payload = data.removePrefix("data: ").trim()
@@ -143,6 +151,8 @@ class AnthropicCompatProvider(private val config: ProviderConfig) : LlmProvider 
                             try {
                                 val jsonObj = json.parseToJsonElement(payload).jsonObject
                                 val type = jsonObj["type"]?.jsonPrimitive?.content ?: ""
+
+                                if (lineCount <= 20) logger.info("[SSE] data type=$type, keys=${jsonObj.keys}")
 
                                 when (type) {
                                     "content_block_delta" -> {
@@ -165,10 +175,12 @@ class AnthropicCompatProvider(private val config: ProviderConfig) : LlmProvider 
                                                     )
                                                 ))
                                             }
+                                        } else {
+                                            logger.info("[SSE] content_block_delta 但 deltaType=$deltaType (非 text_delta), delta=$delta")
                                         }
                                     }
                                     "message_stop" -> {
-                                        // 流式结束
+                                        logger.info("[SSE] 收到 message_stop, 总行数=$lineCount")
                                         break
                                     }
                                     "error" -> {
@@ -177,6 +189,9 @@ class AnthropicCompatProvider(private val config: ProviderConfig) : LlmProvider 
                                             ?: payload
                                         throw LlmException("Anthropic API Error: $errorMsg")
                                     }
+                                    else -> {
+                                        if (lineCount <= 20) logger.info("[SSE] 未处理的 type=$type, payload=${payload.take(200)}")
+                                    }
                                 }
                             } catch (e: LlmException) {
                                 throw e
@@ -184,8 +199,12 @@ class AnthropicCompatProvider(private val config: ProviderConfig) : LlmProvider 
                                 logger.warn("Failed to parse Anthropic SSE: $payload", e)
                             }
                         }
+                        data.isNotBlank() -> {
+                            if (lineCount <= 20) logger.info("[SSE] 非 event/data 行: '$data'")
+                        }
                     }
                 }
+                logger.info("[SSE] 流式读取结束, 总行数=$lineCount")
             }
 
             close()

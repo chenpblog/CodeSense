@@ -155,17 +155,21 @@ class ChatPanel(private val project: Project) {
 
     private fun onSendChat(text: String) {
         messages.add(ChatMessage.user(text))
+        logger.info("[Chat] 用户发送消息: ${text.take(50)}..., 历史消息数: ${messages.size}")
 
         currentJob = scope.launch {
             try {
                 setStatus("AI 正在思考...")
+                logger.info("[Chat] 开始创建 Provider...")
                 val provider = LlmProviderFactory.createDefault()
+                logger.info("[Chat] Provider 创建成功: ${provider.name}, model=${provider.modelName}")
                 val responseBuilder = StringBuilder()
                 startAiMessage()
 
+                logger.info("[Chat] 开始调用 chatCompletionStream...")
                 provider.chatCompletionStream(messages)
                     .catch { e ->
-                        logger.error("Stream error", e)
+                        logger.error("[Chat] Stream error: ${e.javaClass.simpleName}: ${e.message}", e)
                         appendErrorMessage("请求失败: ${e.message}")
                     }
                     .collect { chunk ->
@@ -174,6 +178,7 @@ class ChatPanel(private val project: Project) {
                             appendAiChunk(it)
                         }
                     }
+                logger.info("[Chat] Stream 完成, 响应长度: ${responseBuilder.length}")
 
                 finishAiMessage()
                 val fullResponse = responseBuilder.toString()
@@ -182,9 +187,11 @@ class ChatPanel(private val project: Project) {
                 }
                 setStatus(" ")
             } catch (e: LlmException) {
+                logger.error("[Chat] LlmException: ${e.message}", e)
                 appendErrorMessage(e.message ?: "未知错误")
                 setStatus("发送失败")
             } catch (e: Exception) {
+                logger.error("[Chat] Exception: ${e.javaClass.simpleName}: ${e.message}", e)
                 appendErrorMessage("发生错误: ${e.message}")
                 setStatus("发送失败")
             } finally {

@@ -71,7 +71,7 @@ class ProviderConfigDialog(
             textField()
                 .columns(40)
                 .bindText(::baseUrl)
-                .comment("API 的完整请求地址 (Anthropic Messages API 格式)")
+                .comment("填写完整的终端地址（需要在原来的 BaseURL 上增加 /v1/messages 或 /chat/completions）")
         }
         row("API Key:") {
             passwordField()

@@ -33,7 +33,7 @@ class ReviewGitChangesAction : AnAction() {
                 }
 
                 val reviewPanel = ReviewToolWindowManager.openReviewTab(project, "Review: Git Changes")
-                reviewPanel.appendHtml("<br>分析工作区中 ${diffs.size} 个文件的未提交变更...<br>")
+                reviewPanel.appendMarkdown("\n分析工作区中 ${diffs.size} 个文件的未提交变更...\n\n")
 
                 try {
                     val reviewService = CodeReviewService.getInstance(project)

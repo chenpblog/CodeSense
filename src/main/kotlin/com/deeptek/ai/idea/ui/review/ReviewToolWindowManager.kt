@@ -17,8 +17,14 @@ object ReviewToolWindowManager {
 
         toolWindow.show()
 
-        val reviewPanel = ReviewResultPanel()
-        val content = ContentFactory.getInstance()
+        // 声明一个空的 Content，稍后赋值
+        var content: com.intellij.ui.content.Content? = null
+        
+        val reviewPanel = ReviewResultPanel {
+            content?.let { toolWindow.contentManager.removeContent(it, true) }
+        }
+        
+        content = ContentFactory.getInstance()
             .createContent(reviewPanel.getComponent(), tabTitle, false)
         
         content.isCloseable = true

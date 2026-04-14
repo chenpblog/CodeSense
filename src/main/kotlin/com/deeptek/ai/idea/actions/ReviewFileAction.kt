@@ -39,7 +39,7 @@ class ReviewFileAction : AnAction() {
 
                 // 开启 UI 渲染线程
                 val reviewPanel = ReviewToolWindowManager.openReviewTab(project, "Review: ${file.name}")
-                reviewPanel.appendHtml("<br>分析文件 <b>${file.name}</b> 的 ${diff.changeType.name} 变更...<br>")
+                reviewPanel.appendMarkdown("\n分析文件 **${file.name}** 的 ${diff.changeType.name} 变更...\n\n")
 
                 try {
                     val reviewService = CodeReviewService.getInstance(project)

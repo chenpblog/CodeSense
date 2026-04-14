@@ -39,45 +39,60 @@ data class ProviderConfig(
 }
 
 /**
+ * API 协议类型
+ */
+enum class ApiProtocol {
+    OPENAI_COMPATIBLE,   // OpenAI Chat Completions 格式（Authorization: Bearer）
+    ANTHROPIC_COMPATIBLE // Anthropic Messages API 格式（x-api-key）
+}
+
+/**
  * 模型提供者类型枚举
  *
- * 每个类型预置了默认的 Base URL 和模型名称，
+ * 每个类型预置了默认的 Base URL、模型名称和协议类型，
  * 用户选择类型后自动填充，只需补充 API Key 即可使用。
  */
 enum class ProviderType(
     val displayName: String,
     val defaultBaseUrl: String,
-    val defaultModel: String
+    val defaultModel: String,
+    val apiProtocol: ApiProtocol = ApiProtocol.ANTHROPIC_COMPATIBLE
 ) {
     MINIMAX(
         displayName = "MiniMax",
         defaultBaseUrl = "https://api.minimaxi.com/anthropic/v1/messages",
-        defaultModel = "MiniMax-M2.7"
+        defaultModel = "MiniMax-M2.7",
+        apiProtocol = ApiProtocol.ANTHROPIC_COMPATIBLE
     ),
     GLM(
         displayName = "GLM (智谱)",
-        defaultBaseUrl = "https://open.bigmodel.cn/api/paas/v4/messages",
-        defaultModel = "glm-4"
+        defaultBaseUrl = "https://open.bigmodel.cn/api/paas/v4/chat/completions",
+        defaultModel = "glm-4",
+        apiProtocol = ApiProtocol.OPENAI_COMPATIBLE
     ),
     DEEPSEEK(
         displayName = "DeepSeek",
-        defaultBaseUrl = "https://api.deepseek.com/v1/messages",
-        defaultModel = "deepseek-chat"
+        defaultBaseUrl = "https://api.deepseek.com/v1/chat/completions",
+        defaultModel = "deepseek-chat",
+        apiProtocol = ApiProtocol.OPENAI_COMPATIBLE
     ),
     QWEN(
         displayName = "通义千问",
-        defaultBaseUrl = "https://dashscope.aliyuncs.com/compatible-mode/v1/messages",
-        defaultModel = "qwen-plus"
+        defaultBaseUrl = "https://dashscope.aliyuncs.com/compatible-mode/v1/chat/completions",
+        defaultModel = "qwen-plus",
+        apiProtocol = ApiProtocol.OPENAI_COMPATIBLE
     ),
     MINIMAX_ANTHROPIC(
         displayName = "MiniMax (Anthropic 协议)",
         defaultBaseUrl = "https://api.minimaxi.com/anthropic/v1/messages",
-        defaultModel = "MiniMax-M2.7"
+        defaultModel = "MiniMax-M2.7",
+        apiProtocol = ApiProtocol.ANTHROPIC_COMPATIBLE
     ),
     CUSTOM(
         displayName = "自定义 (Anthropic 兼容)",
         defaultBaseUrl = "",
-        defaultModel = ""
+        defaultModel = "",
+        apiProtocol = ApiProtocol.ANTHROPIC_COMPATIBLE
     );
 
     companion object {

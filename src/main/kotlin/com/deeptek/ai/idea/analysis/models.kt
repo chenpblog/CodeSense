@@ -11,13 +11,17 @@ data class MethodInfo(
     val lineNumber: Int,
     val packageName: String,
     val annotations: List<String>,
-    val changeType: String? = null  // MODIFIED / ADDED (仅 Git Diff 模式)
+    val changeType: String? = null,  // MODIFIED / ADDED (仅 Git Diff 模式)
+    val docComment: String? = null   // JavaDoc/KDoc 注释（首行摘要）
 ) {
     /** 完全限定名 */
     val qualifiedName: String get() = "$packageName.$className.$methodName"
 
     /** 简短显示名 */
     val displayName: String get() = "$className.$methodName"
+
+    /** 带行号的显示名 */
+    val displayNameWithLine: String get() = "$className.$methodName:L$lineNumber"
 }
 
 /**
@@ -34,6 +38,19 @@ data class CallTree(
         val result = mutableListOf<EntryPointInfo>()
         if (isEntryPoint && entryPointInfo != null) {
             result.add(entryPointInfo)
+        } else if (children.isEmpty()) {
+            // OTHER 类型：从代码中提取文件路径信息
+            val fileName = method.filePath.substringAfterLast('/')
+            val otherPath = if (fileName.isNotBlank()) "$fileName:L${method.lineNumber}" else "-"
+            result.add(
+                EntryPointInfo(
+                    method = method,
+                    type = EntryPointType.OTHER,
+                    path = otherPath,
+                    triggerCondition = null,
+                    codeComment = method.docComment
+                )
+            )
         }
         children.forEach { result.addAll(it.collectEntryPoints()) }
         return result
@@ -46,6 +63,18 @@ data class CallTree(
         for (child in children) {
             for (subPath in child.collectChainPaths()) {
                 paths.add(listOf(method) + subPath)
+            }
+        }
+        return paths
+    }
+
+    /** 获取所有叶子到根的完整链路（包含 CallTree 节点信息） */
+    fun collectChainTrees(): List<List<CallTree>> {
+        if (children.isEmpty()) return listOf(listOf(this))
+        val paths = mutableListOf<List<CallTree>>()
+        for (child in children) {
+            for (subPath in child.collectChainTrees()) {
+                paths.add(listOf(this) + subPath)
             }
         }
         return paths
@@ -100,7 +129,9 @@ data class EntryPointInfo(
     val path: String?,              // HTTP: "POST /api/user/update", Dubbo: "UserFacade.method"
     val triggerCondition: String?,   // cron 表达式, topic 等
     val affectedMethods: List<String> = emptyList(),  // 影响的变更方法名
-    val chainDepth: Int = 0          // 调用链深度
+    val chainDepth: Int = 0,          // 调用链深度
+    var aiExplanation: String? = null, // AI 生成的影响说明
+    val codeComment: String? = null   // 从代码注释中提取的说明
 )
 
 /**
@@ -111,5 +142,6 @@ enum class EntryPointType(val icon: String, val displayName: String) {
     DUBBO_RPC("🔗", "Dubbo RPC"),
     SCHEDULED("⏰", "定时任务"),
     MQ_LISTENER("📨", "MQ 消费"),
-    EVENT_LISTENER("📡", "事件监听")
+    EVENT_LISTENER("📡", "事件监听"),
+    OTHER("⚙️", "其他顶级方法")
 }

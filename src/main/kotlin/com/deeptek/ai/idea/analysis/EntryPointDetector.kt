@@ -70,11 +70,13 @@ object EntryPointDetector {
                     val path = extractAnnotationValue(anno, "value")
                         ?: extractAnnotationValue(anno, "path") ?: ""
                     val classPath = extractClassLevelPath(psiMethod)
+                    val fullPath = combineHttpPath(classPath, path)
                     return EntryPointInfo(
                         method = methodInfo,
                         type = EntryPointType.HTTP_API,
-                        path = "$httpMethod $classPath$path",
-                        triggerCondition = null
+                        path = "$httpMethod $fullPath",
+                        triggerCondition = null,
+                        codeComment = methodInfo.docComment
                     )
                 }
 
@@ -90,7 +92,8 @@ object EntryPointDetector {
                         method = methodInfo,
                         type = EntryPointType.SCHEDULED,
                         path = null,
-                        triggerCondition = trigger
+                        triggerCondition = trigger,
+                        codeComment = methodInfo.docComment
                     )
                 }
 
@@ -102,7 +105,8 @@ object EntryPointDetector {
                         method = methodInfo,
                         type = EntryPointType.MQ_LISTENER,
                         path = null,
-                        triggerCondition = "topic=$topic, group=$group"
+                        triggerCondition = "topic=$topic, group=$group",
+                        codeComment = methodInfo.docComment
                     )
                 }
 
@@ -113,7 +117,8 @@ object EntryPointDetector {
                         method = methodInfo,
                         type = EntryPointType.MQ_LISTENER,
                         path = null,
-                        triggerCondition = "topics=$topics"
+                        triggerCondition = "topics=$topics",
+                        codeComment = methodInfo.docComment
                     )
                 }
 
@@ -123,7 +128,8 @@ object EntryPointDetector {
                         method = methodInfo,
                         type = EntryPointType.EVENT_LISTENER,
                         path = null,
-                        triggerCondition = "EventListener"
+                        triggerCondition = "EventListener",
+                        codeComment = methodInfo.docComment
                     )
                 }
             }
@@ -139,7 +145,8 @@ object EntryPointDetector {
                 method = methodInfo,
                 type = EntryPointType.DUBBO_RPC,
                 path = "$interfaceName.${psiMethod.name}",
-                triggerCondition = null
+                triggerCondition = null,
+                codeComment = methodInfo.docComment
             )
         }
 
@@ -200,5 +207,21 @@ object EntryPointDetector {
             }
         }
         return ""
+    }
+
+    /**
+     * 拼接类级别路径和方法级别路径，确保中间有且仅有一个 / 分隔。
+     *
+     * 例如：
+     * - "/trade" + "redeem/pre-check"  → "/trade/redeem/pre-check"
+     * - "/trade" + "/redeem/pre-check" → "/trade/redeem/pre-check"
+     * - ""       + "/redeem/pre-check" → "/redeem/pre-check"
+     */
+    private fun combineHttpPath(classPath: String, methodPath: String): String {
+        if (classPath.isBlank()) return methodPath
+        if (methodPath.isBlank()) return classPath
+        val base = classPath.trimEnd('/')
+        val suffix = methodPath.trimStart('/')
+        return "$base/$suffix"
     }
 }

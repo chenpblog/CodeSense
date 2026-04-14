@@ -14,11 +14,11 @@ import com.intellij.openapi.application.invokeLater
  *
  * 用于在一个全新的 ToolWindow Tab 中展示 AI 审查返回的 Markdown 内容。
  */
-class ReviewResultPanel {
+class ReviewResultPanel(private val onClose: (() -> Unit)? = null) {
 
     private val rootPanel = JPanel(BorderLayout())
     private val messageDisplay: JEditorPane
-    private val htmlContent = StringBuilder()
+    private var rawMarkdown: String = ""
 
     init {
         messageDisplay = JEditorPane().apply {
@@ -33,54 +33,130 @@ class ReviewResultPanel {
             border = JBUI.Borders.empty()
         }
 
+        // 工具栏
+        val toolbar = JPanel().apply {
+            layout = BoxLayout(this, BoxLayout.X_AXIS)
+            border = JBUI.Borders.empty(4, 8)
+
+            add(Box.createHorizontalGlue()) // 靠右对齐
+            if (onClose != null) {
+                add(JButton("❌ 关闭").apply {
+                    addActionListener { onClose.invoke() }
+                })
+            }
+        }
+
+        rootPanel.add(toolbar, BorderLayout.NORTH)
         rootPanel.add(scrollPane, BorderLayout.CENTER)
         
         // 初始装载一个提示
-        appendHtml("请求大模型审查中... 请稍候。")
+        appendMarkdown("**请求大模型审查中... 请稍候。**")
     }
 
     fun getComponent(): JComponent = rootPanel
 
     /**
-     * 追加 HTML 内容 (流式输出调用的简单实现，这里直接将换行符简单替换。
-     * 后续如果想完美支持 Markdown，可以引入 flexmark-java 等依赖，这里做简单处理)
+     * 追加 Markdown 内容 (流式输出调用的简单实现)
      */
     fun appendChunk(chunk: String) {
-        val converted = chunk
-            .replace("<", "&lt;")
-            .replace(">", "&gt;")
-            .replace("\n", "<br>")
-        
-        // 粗略处理加粗
-        val boldPattern = Regex("\\*\\*(.*?)\\*\\*")
-        val withBold = boldPattern.replace(converted) { match ->
-            "<b>${match.groupValues[1]}</b>"
-        }
-        
-        htmlContent.append(withBold)
+        rawMarkdown += chunk
         refreshDisplay()
     }
     
-    fun appendHtml(rawHtml: String) {
-        htmlContent.append(rawHtml)
+    fun appendMarkdown(markdown: String) {
+        rawMarkdown += markdown
         refreshDisplay()
     }
 
     fun reportError(errorMsg: String) {
-        htmlContent.append("<br><br><span style='color: red;'><b>审查失败:</b> $errorMsg</span>")
+        rawMarkdown += "\n\n---\n\n## ⚠️ 审查失败\n\n$errorMsg"
         refreshDisplay()
     }
 
     private fun refreshDisplay() {
         invokeLater {
+            val html = simpleMarkdownToHtml(rawMarkdown)
             messageDisplay.text = """
                 <html><body>
                 <div class="ai-msg">
                     <div class="ai-role">🤖 CodeSense AI Code Review</div>
-                    $htmlContent
+                    $html
                 </div>
                 </body></html>
             """.trimIndent()
         }
+    }
+
+    /**
+     * 简易 Markdown → HTML 转换
+     */
+    private fun simpleMarkdownToHtml(md: String): String {
+        val lines = md.split("\n")
+        val html = StringBuilder()
+        var inCodeBlock = false
+        var inTable = false
+
+        for (line in lines) {
+            when {
+                line.startsWith("```") -> {
+                    if (inCodeBlock) {
+                        html.appendLine("</pre>")
+                    } else {
+                        html.appendLine("<pre>")
+                    }
+                    inCodeBlock = !inCodeBlock
+                }
+                inCodeBlock -> {
+                    html.appendLine(line.replace("<", "&lt;").replace(">", "&gt;"))
+                }
+                line.startsWith("# ") -> html.appendLine("<h1>${processInline(line.removePrefix("# "))}</h1>")
+                line.startsWith("## ") -> html.appendLine("<h2>${processInline(line.removePrefix("## "))}</h2>")
+                line.startsWith("### ") -> html.appendLine("<h3>${processInline(line.removePrefix("### "))}</h3>")
+                line.startsWith("---") -> html.appendLine("<hr/>")
+                line.startsWith("|") -> {
+                    if (!inTable) {
+                        html.appendLine("<table>")
+                        inTable = true
+                    }
+                    if (line.contains("---|")) {
+                        // 表头分隔行，跳过
+                    } else {
+                        val cells = line.split("|").filter { it.isNotBlank() }
+                        html.append("<tr>")
+                        cells.forEach { cell ->
+                            html.append("<td>${processInline(cell.trim())}</td>")
+                        }
+                        html.appendLine("</tr>")
+                    }
+                }
+                line.startsWith("- ") -> {
+                    html.appendLine("<li>${processInline(line.removePrefix("- "))}</li>")
+                }
+                line.startsWith("*") && line.endsWith("*") -> {
+                    html.appendLine("<p><em>${processInline(line.trim('*', ' '))}</em></p>")
+                }
+                line.isBlank() -> {
+                    if (inTable) {
+                        html.appendLine("</table>")
+                        inTable = false
+                    }
+                    html.appendLine("<br/>")
+                }
+                else -> html.appendLine("<p>${processInline(line)}</p>")
+            }
+        }
+        if (inTable) html.appendLine("</table>")
+        if (inCodeBlock) html.appendLine("</pre>")
+
+        return html.toString()
+    }
+
+    private fun processInline(text: String): String {
+        var result = text
+        // 粗体 **text**
+        result = Regex("\\*\\*(.*?)\\*\\*").replace(result) { "<b>${it.groupValues[1]}</b>" }
+        // 行内代码 `code`
+        result = Regex("`(.*?)`").replace(result) { "<code>${it.groupValues[1]}</code>" }
+        return result
     }
 }

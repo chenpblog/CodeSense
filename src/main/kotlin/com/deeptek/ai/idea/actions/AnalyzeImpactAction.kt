@@ -54,8 +54,11 @@ class AnalyzeImpactAction : AnAction() {
         val toolWindow = ToolWindowManager.getInstance(project).getToolWindow("CodeSense AI") ?: return
         toolWindow.show()
 
-        val resultPanel = ImpactResultPanel(project)
-        val content = ContentFactory.getInstance()
+        var content: com.intellij.ui.content.Content? = null
+        val resultPanel = ImpactResultPanel(project) {
+            content?.let { toolWindow.contentManager.removeContent(it, true) }
+        }
+        content = ContentFactory.getInstance()
             .createContent(resultPanel.getComponent(), "🔍 $methodName", false)
         content.isCloseable = true
         toolWindow.contentManager.addContent(content)
@@ -80,6 +83,8 @@ class AnalyzeImpactAction : AnAction() {
 
                 val duration = System.currentTimeMillis() - startTime
 
+                val defaultProviderName = try { settings.getDefaultProvider().displayName } catch (e: Exception) { "未使用" }
+
                 // Step 2: 构建 ImpactReport
                 val report = ImpactReport(
                     mode = AnalysisMode.SINGLE_METHOD,
@@ -87,39 +92,92 @@ class AnalyzeImpactAction : AnAction() {
                     callChains = mapOf(biTree.method to biTree),
                     entryPoints = entryPoints,
                     analysisDuration = duration,
-                    maxDepth = maxDepth
+                    maxDepth = maxDepth,
+                    metadata = mapOf("llmModel" to defaultProviderName)
                 )
 
-                // Step 3: 生成 Markdown 报告
-                val markdown = ReportGenerator.generateSingleMethodReport(report, biTree)
-                resultPanel.setMarkdownContent(markdown)
+                // Step 3: 生成初始 Markdown 报告
+                resultPanel.setMarkdownContent(ReportGenerator.generateSingleMethodReport(report, biTree))
 
-                // Step 4: 可选 — AI 风险评估
+                // Step 4: 可选 — AI 风险评估与短评 (方案 B: 双重异步请求)
                 if (enableAi) {
                     try {
                         val provider = LlmProviderFactory.createDefault()
-                        val prompt = buildAiRiskPrompt(markdown, methodName)
-                        val messages = listOf(
-                            ChatMessage.system("你是一位资深的 Java/Kotlin 后端架构师，正在审查代码影响范围分析报告。"),
-                            ChatMessage.user(prompt)
-                        )
 
-                        val aiBuilder = StringBuilder()
-                        provider.chatCompletionStream(messages).collect { chunk ->
-                            val deltaContent = chunk.deltaContent
-                            if (deltaContent != null) {
-                                aiBuilder.append(deltaContent)
-                                // 流式更新 AI 部分
-                                val updatedMarkdown = markdown.replace(
-                                    "*AI 分析将在分析完成后自动生成...*",
-                                    aiBuilder.toString()
-                                )
-                                resultPanel.setMarkdownContent(updatedMarkdown)
+                        // 异步请求 1：所有受影响入口点的短评（三层 fallback）
+                        if (report.entryPoints.isNotEmpty()) {
+                            launch {
+                                try {
+                                    // 第一层：有代码注释的入口点，直接使用注释，不调 AI
+                                    // （ReportGenerator 渲染时已处理注释标注【注释】）
+
+                                    // 过滤出需要 AI 生成说明的入口点（无注释的）
+                                    val needAiEntryPoints = report.entryPoints.filter { it.codeComment.isNullOrBlank() }
+
+                                    if (needAiEntryPoints.isNotEmpty()) {
+                                        // 第二层：调用 AI 生成无注释入口点的说明
+                                        val epPrompt = buildEntryPointPrompt(needAiEntryPoints, methodName)
+                                        val epMessages = listOf(
+                                            ChatMessage.system("你是一个专业的代码影响评估助手，擅长分析方法变更对上游调用者的影响。"),
+                                            ChatMessage.user(epPrompt)
+                                        )
+                                        val response = provider.chatCompletion(epMessages)
+                                        // 提取以 ENTRY_ 开头的行
+                                        val lines = response.content.orEmpty().lines()
+                                            .filter { it.contains("ENTRY_") }
+                                            .map { it.substringAfter(":", "").trim() }
+
+                                        synchronized(report) {
+                                            needAiEntryPoints.forEachIndexed { i, ep ->
+                                                val aiResult = lines.getOrNull(i)
+                                                ep.aiExplanation = if (!aiResult.isNullOrBlank()) aiResult else null
+                                            }
+                                            resultPanel.setMarkdownContent(ReportGenerator.generateSingleMethodReport(report, biTree))
+                                        }
+                                    } else {
+                                        // 所有入口点都有注释，刷新一次报告即可
+                                        synchronized(report) {
+                                            resultPanel.setMarkdownContent(ReportGenerator.generateSingleMethodReport(report, biTree))
+                                        }
+                                    }
+                                } catch (e: Exception) {
+                                    logger.warn("AI entry point explanation failed", e)
+                                }
                             }
                         }
+
+                        // 异步请求 2：全局代码风险评估 (流式)
+                        launch {
+                            try {
+                                val initMarkdown = ReportGenerator.generateSingleMethodReport(report, biTree)
+                                val prompt = buildAiRiskPrompt(initMarkdown, methodName)
+                                val messages = listOf(
+                                    ChatMessage.system("你是一位资深的 Java/Kotlin 后端架构师，正在审查代码影响范围分析报告。"),
+                                    ChatMessage.user(prompt)
+                                )
+
+                                val aiBuilder = StringBuilder()
+                                provider.chatCompletionStream(messages).collect { chunk ->
+                                    val deltaContent = chunk.deltaContent
+                                    if (deltaContent != null) {
+                                        aiBuilder.append(deltaContent)
+                                        synchronized(report) {
+                                            report.aiSummary = aiBuilder.toString()
+                                            resultPanel.setMarkdownContent(ReportGenerator.generateSingleMethodReport(report, biTree))
+                                        }
+                                    }
+                                }
+                            } catch (e: Exception) {
+                                logger.warn("AI main risk assessment failed", e)
+                                synchronized(report) {
+                                    report.aiSummary = "\n\n> ⚠️ AI 风险评估生成失败: ${e.message}"
+                                    resultPanel.setMarkdownContent(ReportGenerator.generateSingleMethodReport(report, biTree))
+                                }
+                            }
+                        }
+
                     } catch (e: Exception) {
-                        logger.warn("AI risk assessment failed", e)
-                        resultPanel.appendMarkdown("\n\n> ⚠️ AI 风险评估生成失败: ${e.message}")
+                        logger.warn("AI provider initialization failed", e)
                     }
                 }
 
@@ -150,6 +208,31 @@ class AnalyzeImpactAction : AnAction() {
 以下是报告内容：
 
 $reportMarkdown
+        """.trimIndent()
+    }
+
+    private fun buildEntryPointPrompt(entryPoints: List<EntryPointInfo>, methodName: String): String {
+        val epList = entryPoints.mapIndexed { index, ep ->
+            val pathInfo = ep.path ?: ep.triggerCondition ?: "-"
+            val annoInfo = if (ep.method.annotations.isNotEmpty()) {
+                " 注解: ${ep.method.annotations.joinToString(", ") { "@$it" }}"
+            } else ""
+            "${index + 1}. [${ep.type.displayName}] ${ep.method.displayNameWithLine} | 签名: ${ep.method.signature} | 路径: $pathInfo$annoInfo"
+        }.joinToString("\n")
+
+        return """
+基于方法变更 `$methodName`，请分别为以下受影响的业务入口点提供一句话（20字以内）的影响短评。
+
+要求：
+1. 根据入口点的类型、方法名、签名和路径信息，推断该入口点受变更影响后可能出现的具体问题
+2. 短评应具体化，例如"用户详情接口返回数据异常"、"定时同步任务执行报错"、"订单消息消费失败"
+3. 避免笼统描述，要结合方法名和路径给出有针对性的分析
+4. 必须严格按以下格式返回，每个入口点一行：
+ENTRY_1: xxx
+ENTRY_2: yyy
+
+入口点列表：
+$epList
         """.trimIndent()
     }
 }
