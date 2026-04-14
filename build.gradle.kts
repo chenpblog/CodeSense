@@ -49,6 +49,12 @@ intellijPlatform {
             untilBuild = "263.*"
         }
     }
+    
+    // pluginVerification {
+    //     ides {
+    //         recommended()
+    //     }
+    // }
 }
 
 tasks {
