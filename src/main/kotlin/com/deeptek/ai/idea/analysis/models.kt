@@ -9,6 +9,7 @@ data class MethodInfo(
     val signature: String,
     val filePath: String,
     val lineNumber: Int,
+    val lineEndNumber: Int = 0,      // 方法结束行号（Git Diff 方法体对比用）
     val packageName: String,
     val annotations: List<String>,
     val changeType: String? = null,  // MODIFIED / ADDED (仅 Git Diff 模式)
@@ -21,7 +22,13 @@ data class MethodInfo(
     val displayName: String get() = "$className.$methodName"
 
     /** 带行号的显示名 */
-    val displayNameWithLine: String get() = "$className.$methodName:L$lineNumber"
+    val displayNameWithLine: String get() {
+        return if (lineEndNumber > 0 && lineEndNumber != lineNumber) {
+            "$className.$methodName:L${lineNumber}-L${lineEndNumber}"
+        } else {
+            "$className.$methodName:L$lineNumber"
+        }
+    }
 }
 
 /**

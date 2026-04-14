@@ -89,6 +89,14 @@ class ImpactResultPanel(private val project: Project, private val onClose: (() -
     }
 
     /**
+     * 更新加载进度信息（不重置整个内容）
+     */
+    fun updateLoading(message: String) {
+        rawMarkdown = "# ⏳ $message\n\n请稍候，分析可能需要几秒钟..."
+        refreshDisplay()
+    }
+
+    /**
      * 显示错误
      */
     fun showError(error: String) {

@@ -1,7 +1,7 @@
 plugins {
     id("java")
-    id("org.jetbrains.kotlin.jvm") version "1.9.25"
-    id("org.jetbrains.kotlin.plugin.serialization") version "1.9.25"
+    id("org.jetbrains.kotlin.jvm") version "2.1.0"
+    id("org.jetbrains.kotlin.plugin.serialization") version "2.1.0"
     id("org.jetbrains.intellij.platform") version "2.11.0"
 }
 
@@ -21,6 +21,7 @@ dependencies {
         intellijIdeaCommunity(providers.gradleProperty("platformVersion").get())
         bundledPlugin("Git4Idea")
         bundledPlugin("com.intellij.java")
+        bundledPlugin("org.jetbrains.kotlin")
     }
 
     // OkHttp for HTTP communication

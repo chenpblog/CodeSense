@@ -29,6 +29,7 @@ object ReportGenerator {
         report.metadata["sourceBranch"]?.let { sb.appendLine("| **当前分支** | `$it` |") }
         report.metadata["targetBranch"]?.let { sb.appendLine("| **目标分支** | `$it` |") }
         sb.appendLine("| **分析时间** | $now |")
+        report.metadata["changedFileCount"]?.let { sb.appendLine("| **变更文件数** | $it |") }
         sb.appendLine("| **变更方法数** | ${report.modifiedMethods.size} |")
         sb.appendLine("| **受影响入口点** | ${report.entryPoints.size} |")
         sb.appendLine("| **风险等级** | ${inferRiskLevel(report)} |")
@@ -44,7 +45,12 @@ object ReportGenerator {
         report.modifiedMethods.forEachIndexed { index, method ->
             val fileName = method.filePath.substringAfterLast('/')
             val changeType = method.changeType ?: "MODIFIED"
-            sb.appendLine("| ${index + 1} | `$fileName` | `${method.signature}` | $changeType | L${method.lineNumber} |")
+            val lineRange = if (method.lineEndNumber > 0 && method.lineEndNumber != method.lineNumber) {
+                "L${method.lineNumber}-L${method.lineEndNumber}"
+            } else {
+                "L${method.lineNumber}"
+            }
+            sb.appendLine("| ${index + 1} | `$fileName` | `${method.signature}` | $changeType | $lineRange |")
         }
         sb.appendLine()
         sb.appendLine("---")
@@ -264,9 +270,10 @@ object ReportGenerator {
                     sb.appendLine("[${tree.entryPointInfo.type.displayName}] ${tree.entryPointInfo.path ?: tree.entryPointInfo.triggerCondition ?: ""}")
                 }
 
-                val marker = if (isTarget) " ★ " else ""
-                val suffix = if (isTarget) "  ← 目标方法" else ""
-                sb.appendLine("$indent$prefix$marker${node.displayName}(${node.signature.substringAfter('(')})$suffix")
+                val marker = if (isTarget) "★ " else ""
+                val suffix = if (isTarget) "  ← 被修改方法" else ""
+                val annoSuffix = formatAnnotationSuffix(node)
+                sb.appendLine("$indent$prefix$marker${node.displayName}(${node.signature.substringAfter('(')})$annoSuffix$suffix")
             }
             sb.appendLine()
         }
@@ -281,10 +288,29 @@ object ReportGenerator {
             depth == 0 -> "★ "
             else -> "├── "
         }
-        sb.appendLine("$indent$prefix${tree.method.displayName}(${tree.method.signature.substringAfter('(')})")
+        val annoSuffix = formatAnnotationSuffix(tree.method)
+        sb.appendLine("$indent$prefix${tree.method.displayName}(${tree.method.signature.substringAfter('(')})$annoSuffix")
         tree.children.forEach { child ->
             renderCalleeTree(sb, child, depth + 1)
         }
+    }
+
+    /**
+     * 格式化注解旁注（如 ← @PostMapping、← @Scheduled 等）
+     */
+    private fun formatAnnotationSuffix(method: MethodInfo): String {
+        if (method.annotations.isEmpty()) return ""
+        // 只显示入口类型注解
+        val entryAnnotations = setOf(
+            "GetMapping", "PostMapping", "PutMapping", "DeleteMapping", "PatchMapping", "RequestMapping",
+            "Scheduled", "RocketMQMessageListener", "KafkaListener",
+            "EventListener", "TransactionalEventListener",
+            "DubboService", "PostConstruct"
+        )
+        val matched = method.annotations.filter { it in entryAnnotations }
+        return if (matched.isNotEmpty()) {
+            "  ← @${matched.first()}"
+        } else ""
     }
 
     /**

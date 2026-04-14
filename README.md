@@ -156,7 +156,7 @@ export JAVA_HOME=/path/to/jdk-21
 构建产物位于：
 
 ```
-build/distributions/CodeSense AI-0.1.0.zip
+build/distributions/codesense-ai-plugin-0.1.0.zip
 ```
 
 这个 ZIP 文件可以直接在 IntelliJ IDEA 中安装：

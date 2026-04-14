@@ -1,0 +1,4 @@
+<idea-plugin>
+    <!-- Kotlin 可选特性配置 -->
+    <!-- 当安装了 Kotlin 插件时，DiffMethodExtractor 可以解析 .kt 文件中的方法 -->
+</idea-plugin>

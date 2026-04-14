@@ -18,6 +18,7 @@
     <depends>com.intellij.modules.platform</depends>
     <depends>Git4Idea</depends>
     <depends>com.intellij.java</depends>
+    <depends optional="true" config-file="kotlin-features.xml">org.jetbrains.kotlin</depends>
 
     <extensions defaultExtensionNs="com.intellij">
         <!-- Chat ToolWindow (右侧侧边栏) -->
@@ -54,10 +55,6 @@
                     class="com.deeptek.ai.idea.actions.ExplainCodeAction"
                     text="解释代码"
                     description="使用 AI 解释选中的代码"/>
-            <action id="CodeSense.ReviewFile"
-                    class="com.deeptek.ai.idea.actions.ReviewFileAction"
-                    text="审查此文件"
-                    description="使用 AI 审查当前文件"/>
             <action id="CodeSense.AnalyzeImpact"
                     class="com.deeptek.ai.idea.actions.AnalyzeImpactAction"
                     text="分析影响范围"
@@ -66,12 +63,29 @@
                     class="com.deeptek.ai.idea.actions.AskCodeSenseAction"
                     text="咨询 AI"
                     description="带上选中代码打开 AI 对话"/>
-            <action id="CodeSense.ReviewGitChanges"
-                    class="com.deeptek.ai.idea.actions.ReviewGitChangesAction"
-                    text="审查全量 Git 未提交变更"
-                    description="调用大模型分析本地未提交的所有代码变动">
-                <add-to-group group-id="VcsGroups" anchor="last"/>
-            </action>
+        </group>
+
+        <!-- VCS 菜单：审查当前分支与主干 -->
+        <action id="CodeSense.ReviewGitChanges"
+                class="com.deeptek.ai.idea.actions.ReviewGitChangesAction"
+                text="审查当前分支与主干"
+                description="对比当前分支与主干分支的差异，调用大模型进行代码审查">
+            <add-to-group group-id="VcsGroups" anchor="last"/>
+        </action>
+
+        <!-- VCS 菜单：分析变更影响范围 -->
+        <action id="CodeSense.AnalyzeBranchImpact"
+                class="com.deeptek.ai.idea.actions.AnalyzeBranchImpactAction"
+                text="分析变更影响范围"
+                description="对比分支差异，自动分析所有变更方法的调用链和影响范围">
+            <add-to-group group-id="VcsGroups" anchor="last"/>
+        </action>
+
+        <!-- Tools 菜单 -->
+        <group id="CodeSense.ToolsMenu" text="CodeSense AI" popup="true">
+            <add-to-group group-id="ToolsMenu" anchor="last"/>
+            <reference ref="CodeSense.AnalyzeBranchImpact"/>
+            <reference ref="CodeSense.ReviewGitChanges"/>
         </group>
     </actions>
 </idea-plugin>
