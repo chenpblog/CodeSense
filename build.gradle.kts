@@ -63,6 +63,11 @@ intellijPlatform {
             // ide("IU-2024.2.3")
         }
     }
+
+    // 插件发布配置
+    publishing {
+        token = providers.environmentVariable("PUBLISH_TOKEN")
+    }
 }
 
 tasks {
