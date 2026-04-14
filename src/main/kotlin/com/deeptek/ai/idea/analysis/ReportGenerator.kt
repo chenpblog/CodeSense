@@ -71,13 +71,6 @@ object ReportGenerator {
             sb.appendLine("```")
             sb.appendLine()
 
-            // 向下调用链
-            sb.appendLine("**向下调用链（我调用了谁）：**")
-            sb.appendLine()
-            sb.appendLine("```")
-            renderCalleeTree(sb, biTree.calleeTree, 0)
-            sb.appendLine("```")
-            sb.appendLine()
         }
         sb.appendLine("---")
         sb.appendLine()
@@ -279,21 +272,7 @@ object ReportGenerator {
         }
     }
 
-    /**
-     * 渲染向下调用链
-     */
-    private fun renderCalleeTree(sb: StringBuilder, tree: CallTree, depth: Int) {
-        val indent = "  ".repeat(depth)
-        val prefix = when {
-            depth == 0 -> "★ "
-            else -> "├── "
-        }
-        val annoSuffix = formatAnnotationSuffix(tree.method)
-        sb.appendLine("$indent$prefix${tree.method.displayName}(${tree.method.signature.substringAfter('(')})$annoSuffix")
-        tree.children.forEach { child ->
-            renderCalleeTree(sb, child, depth + 1)
-        }
-    }
+
 
     /**
      * 格式化注解旁注（如 ← @PostMapping、← @Scheduled 等）

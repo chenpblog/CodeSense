@@ -65,13 +65,15 @@
                     description="带上选中代码打开 AI 对话"/>
         </group>
 
-        <!-- VCS 菜单：审查当前分支与主干 -->
+        <!-- VCS 菜单：审查当前分支与主干 (暂时隐藏) -->
+        <!--
         <action id="CodeSense.ReviewGitChanges"
                 class="com.deeptek.ai.idea.actions.ReviewGitChangesAction"
                 text="审查当前分支与主干"
                 description="对比当前分支与主干分支的差异，调用大模型进行代码审查">
             <add-to-group group-id="VcsGroups" anchor="last"/>
         </action>
+        -->
 
         <!-- VCS 菜单：分析变更影响范围 -->
         <action id="CodeSense.AnalyzeBranchImpact"
@@ -85,7 +87,7 @@
         <group id="CodeSense.ToolsMenu" text="CodeSense AI" popup="true">
             <add-to-group group-id="ToolsMenu" anchor="last"/>
             <reference ref="CodeSense.AnalyzeBranchImpact"/>
-            <reference ref="CodeSense.ReviewGitChanges"/>
+            <!-- <reference ref="CodeSense.ReviewGitChanges"/> -->
         </group>
     </actions>
 </idea-plugin>
