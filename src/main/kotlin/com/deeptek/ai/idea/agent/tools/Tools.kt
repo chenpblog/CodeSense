@@ -331,19 +331,19 @@ class CallHierarchyTool : AgentTool {
 
         // 使用 PSI 查找方法
         return try {
-            com.intellij.openapi.application.ReadAction.compute<String, Throwable> {
+            com.intellij.openapi.application.runReadAction<String> {
                 val javaPsiFacade = com.intellij.psi.JavaPsiFacade.getInstance(project)
                 val scope = com.intellij.psi.search.GlobalSearchScope.projectScope(project)
                 val psiClass = javaPsiFacade.findClasses(className, scope).firstOrNull()
                     ?: javaPsiFacade.findClasses("*.$className", scope).firstOrNull()
 
                 if (psiClass == null) {
-                    return@compute "未找到类: $className"
+                    return@runReadAction "未找到类: $className"
                 }
 
                 val methods = psiClass.findMethodsByName(methodName, false)
                 if (methods.isEmpty()) {
-                    return@compute "在类 $className 中未找到方法: $methodName"
+                    return@runReadAction "在类 $className 中未找到方法: $methodName"
                 }
 
                 val analyzer = com.deeptek.ai.idea.analysis.CallHierarchyAnalyzer.getInstance(project)

@@ -9,7 +9,7 @@ import com.intellij.openapi.actionSystem.ActionUpdateThread
 import com.intellij.openapi.actionSystem.AnAction
 import com.intellij.openapi.actionSystem.AnActionEvent
 import com.intellij.openapi.actionSystem.CommonDataKeys
-import com.intellij.openapi.application.ReadAction
+import com.intellij.openapi.application.runReadAction
 import com.intellij.openapi.diagnostic.Logger
 import com.intellij.openapi.ui.Messages
 import com.intellij.openapi.wm.ToolWindowManager
@@ -46,7 +46,7 @@ class AnalyzeImpactAction : AnAction() {
             return
         }
 
-        val methodName = ReadAction.compute<String, Throwable> {
+        val methodName = runReadAction {
             "${psiMethod.containingClass?.name ?: ""}.${psiMethod.name}"
         }
 

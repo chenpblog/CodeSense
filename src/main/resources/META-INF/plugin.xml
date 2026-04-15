@@ -48,6 +48,11 @@
             serviceImplementation="com.deeptek.ai.idea.review.CodeReviewService"/>
     </extensions>
 
+    <!-- Kotlin Plugin 兼容性声明 (K1/K2 模式) -->
+    <extensions defaultExtensionNs="org.jetbrains.kotlin">
+        <supportsKotlinPluginMode supportsK1="true" supportsK2="true"/>
+    </extensions>
+
     <actions>
         <!-- 编辑器右键菜单 -->
         <group id="CodeSense.EditorPopupMenu" text="CodeSense AI" popup="true">

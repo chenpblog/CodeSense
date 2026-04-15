@@ -5,12 +5,11 @@ import com.intellij.ide.hierarchy.HierarchyNodeDescriptor
 import com.intellij.ide.hierarchy.call.CalleeMethodsTreeStructure
 import com.intellij.ide.hierarchy.call.CallerMethodsTreeStructure
 import com.intellij.ide.util.treeView.NodeDescriptor
-import com.intellij.openapi.application.ReadAction
+import com.intellij.openapi.application.runReadAction
 import com.intellij.openapi.components.Service
 import com.intellij.openapi.diagnostic.Logger
 import com.intellij.openapi.project.Project
 import com.intellij.psi.*
-import com.intellij.psi.search.GlobalSearchScope
 import com.intellij.psi.util.PsiTreeUtil
 
 /**
@@ -34,7 +33,7 @@ class CallHierarchyAnalyzer(private val project: Project) {
      */
     fun analyzeCallers(psiMethod: PsiMethod, maxDepth: Int = 10): CallTree {
         logger.info("Analyzing callers of ${psiMethod.name}, maxDepth=$maxDepth")
-        return ReadAction.compute<CallTree, Throwable> {
+        return runReadAction {
             val methodInfo = psiMethod.toMethodInfo()
             val isEntry = EntryPointDetector.isEntryPoint(psiMethod)
             val entryInfo = if (isEntry) EntryPointDetector.extractEntryPointInfo(psiMethod, methodInfo) else null
@@ -54,7 +53,7 @@ class CallHierarchyAnalyzer(private val project: Project) {
      */
     fun analyzeCallees(psiMethod: PsiMethod, maxDepth: Int = 10): CallTree {
         logger.info("Analyzing callees of ${psiMethod.name}, maxDepth=$maxDepth")
-        return ReadAction.compute<CallTree, Throwable> {
+        return runReadAction {
             val methodInfo = psiMethod.toMethodInfo()
             val callees = findCallees(psiMethod, maxDepth, mutableSetOf())
             CallTree(
@@ -69,7 +68,7 @@ class CallHierarchyAnalyzer(private val project: Project) {
      * 双向分析
      */
     fun analyzeBidirectional(psiMethod: PsiMethod, maxDepth: Int = 10): BidirectionalCallTree {
-        val methodInfo = ReadAction.compute<MethodInfo, Throwable> { psiMethod.toMethodInfo() }
+        val methodInfo = runReadAction { psiMethod.toMethodInfo() }
         val callerTree = analyzeCallers(psiMethod, maxDepth)
         val calleeTree = analyzeCallees(psiMethod, maxDepth)
         return BidirectionalCallTree(
@@ -83,7 +82,7 @@ class CallHierarchyAnalyzer(private val project: Project) {
      * 根据光标所在偏移量获取 PsiMethod
      */
     fun findMethodAtCaret(psiFile: PsiFile, offset: Int): PsiMethod? {
-        return ReadAction.compute<PsiMethod?, Throwable> {
+        return runReadAction {
             val element = psiFile.findElementAt(offset)
             PsiTreeUtil.getParentOfType(element, PsiMethod::class.java)
         }

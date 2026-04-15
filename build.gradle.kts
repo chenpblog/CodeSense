@@ -71,7 +71,4 @@ intellijPlatform {
 }
 
 tasks {
-    buildSearchableOptions {
-        enabled = false
-    }
 }

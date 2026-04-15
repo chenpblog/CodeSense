@@ -10,7 +10,6 @@ import java.awt.BorderLayout
 import java.awt.Toolkit
 import java.awt.datatransfer.StringSelection
 import javax.swing.*
-import javax.swing.text.html.HTMLEditorKit
 
 /**
  * 影响分析报告展示面板
@@ -121,8 +120,10 @@ class ImpactResultPanel(private val project: Project, private val onClose: (() -
         Toolkit.getDefaultToolkit().systemClipboard.setContents(selection, null)
     }
 
+    @Suppress("removal", "DEPRECATION")
     private fun exportToFile() {
-        val descriptor = FileSaverDescriptor("导出影响分析报告", "保存为 Markdown 文件", "md")
+        val descriptor = FileSaverDescriptor("导出影响分析报告", "保存为 Markdown 文件")
+        descriptor.withExtensionFilter("md")
         val dialog = FileChooserFactory.getInstance().createSaveFileDialog(descriptor, project)
         val wrapper = dialog.save("impact-analysis-report.md") ?: return
         try {
