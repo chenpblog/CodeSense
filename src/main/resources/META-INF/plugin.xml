@@ -4,13 +4,14 @@
     <vendor email="chenping@deeptek.ai" url="https://github.com/chenping">chenp</vendor>
 
     <description><![CDATA[
+    <p>CodeSense AI is an intelligent code assistant plugin for IntelliJ IDEA, powered by large language models.</p>
     <h2>CodeSense AI — 代码感知 AI 助手</h2>
     <p>IntelliJ IDEA 的智能代码助手插件，提供以下能力：</p>
     <ul>
-        <li><b>代码审查</b>：基于 Git Diff 的 AI 代码 Review</li>
-        <li><b>影响范围分析</b>：自动分析代码修改的调用链和影响范围</li>
-        <li><b>Agent 自主执行</b>：AI 可以自主使用工具完成复杂任务</li>
-        <li><b>多模型支持</b>：支持 MiniMax、GLM、DeepSeek、通义千问等</li>
+        <li><b>Code Review</b> — AI-powered code review based on Git Diff / 基于 Git Diff 的 AI 代码审查</li>
+        <li><b>Impact Analysis</b> — Automatically analyze call chains and impact scope of code changes / 自动分析代码修改的调用链和影响范围</li>
+        <li><b>Agent Execution</b> — AI autonomously uses tools to complete complex tasks / AI 自主使用工具完成复杂任务</li>
+        <li><b>Multi-Model Support</b> — MiniMax, GLM, DeepSeek, Qwen and more / 支持 MiniMax、GLM、DeepSeek、通义千问等</li>
     </ul>
     ]]></description>
 
