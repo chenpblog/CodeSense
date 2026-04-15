@@ -1,7 +1,7 @@
 <idea-plugin>
     <id>com.deeptek.ai.idea</id>
     <name>CodeSense AI</name>
-    <vendor email="chenping@deeptek.ai" url="https://github.com/chenping">chenp</vendor>
+    <vendor email="chenpmmc@gmail.com" url="https://github.com/chenpblog/">chenp</vendor>
 
     <description><![CDATA[
     <p>CodeSense AI is an intelligent code assistant plugin for IntelliJ IDEA, powered by large language models.</p>
