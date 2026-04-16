@@ -92,8 +92,20 @@
         <!-- Tools 菜单 -->
         <group id="CodeSense.ToolsMenu" text="CodeSense AI" popup="true">
             <add-to-group group-id="ToolsMenu" anchor="last"/>
+            <!-- 针对主菜单的设计器入口 -->
+            <action id="CodeSense.JsonToBeanAction"
+                    class="com.deeptek.ai.idea.actions.JsonToBeanAction"
+                    text="JSON to Java Bean 设计器"
+                    description="可视化设计接口字段并使用 AI 自动生成 Java Bean 类"/>
+            <separator/>
             <reference ref="CodeSense.AnalyzeBranchImpact"/>
             <!-- <reference ref="CodeSense.ReviewGitChanges"/> -->
+        </group>
+        
+        <!-- Project 目录视图右键菜单也加上该设计器入口 -->
+        <group id="CodeSense.ProjectViewPopupMenu">
+            <add-to-group group-id="ProjectViewPopupMenu" anchor="last"/>
+            <reference ref="CodeSense.JsonToBeanAction"/>
         </group>
     </actions>
 </idea-plugin>

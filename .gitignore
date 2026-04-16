@@ -23,3 +23,9 @@ out/
 # Temporary / Scratch Files
 scratch.kt
 *.log
+
+# Local Environments & Configurations
+.sdkmanrc
+.env
+.env.local
+.env.*.local

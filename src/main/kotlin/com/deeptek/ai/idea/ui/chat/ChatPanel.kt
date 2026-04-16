@@ -168,7 +168,7 @@ class ChatPanel(private val project: Project) {
                     logger.info("[Chat] Provider 创建成功: ${p.name}, model=${p.modelName}")
                     p
                 } catch (e: Exception) {
-                    logger.error("[Chat] Provider 创建失败: ${e.message}", e)
+                    logger.warn("[Chat] Provider 创建失败: ${e.message}")
                     finishAiMessage()
                     appendErrorMessage("模型初始化失败: ${e.message}\n\n请检查 Settings → Tools → CodeSense AI 中的模型配置。")
                     setStatus("配置错误")
@@ -234,12 +234,12 @@ class ChatPanel(private val project: Project) {
                     }
                 }
             } catch (e: LlmException) {
-                logger.error("[Chat] LlmException: ${e.message}", e)
+                logger.warn("[Chat] LlmException: ${e.message}")
                 finishAiMessage()
                 appendErrorMessage("请求失败: ${e.message}")
                 setStatus("发送失败")
             } catch (e: Exception) {
-                logger.error("[Chat] Exception: ${e.javaClass.simpleName}: ${e.message}", e)
+                logger.warn("[Chat] Exception: ${e.javaClass.simpleName}: ${e.message}")
                 finishAiMessage()
                 appendErrorMessage("发生错误: ${e.javaClass.simpleName}: ${e.message}")
                 setStatus("发送失败")
@@ -289,6 +289,7 @@ class ChatPanel(private val project: Project) {
                     }
                 }
             } catch (e: Exception) {
+                logger.warn("Agent 错误: ${e.message}")
                 appendErrorMessage("Agent 错误: ${e.message}")
                 setStatus("Agent 执行失败")
             } finally {

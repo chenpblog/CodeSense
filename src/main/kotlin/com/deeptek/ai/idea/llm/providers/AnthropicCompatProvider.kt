@@ -278,6 +278,8 @@ class AnthropicCompatProvider(private val config: ProviderConfig) : LlmProvider 
         }
 
         val bodyStr = requestBody.toString()
+        logger.info("Anthropic Non-Stream Request: model=${config.modelName}, url=${config.baseUrl}")
+        logger.debug("Request body: $bodyStr")
 
         val httpRequest = Request.Builder()
             .url(config.baseUrl)
@@ -289,18 +291,32 @@ class AnthropicCompatProvider(private val config: ProviderConfig) : LlmProvider 
 
         val response = withContext(Dispatchers.IO) { httpClient.newCall(httpRequest).execute() }
         val responseBody = response.body?.string() ?: throw LlmException("Empty response body")
+        
+        logger.info("Anthropic Non-Stream Response code: ${response.code}")
 
         if (!response.isSuccessful) {
+            logger.error("Anthropic Non-Stream Error: $responseBody")
             throw LlmException("LLM API 错误 (HTTP ${response.code})\nURL: ${config.baseUrl}\n$responseBody")
         }
 
         // 解析 Anthropic 响应并转换为 OpenAI 格式的 ChatResponse
+        logger.info("Anthropic Non-Stream Response body (前500字): ${responseBody.take(500)}")
         val jsonObj = json.parseToJsonElement(responseBody).jsonObject
         val contentArray = jsonObj["content"]?.jsonArray
+        logger.info("Anthropic content blocks 数量: ${contentArray?.size ?: 0}")
+        contentArray?.forEachIndexed { idx, block ->
+            val blockType = block.jsonObject["type"]?.jsonPrimitive?.content
+            logger.info("  content block[$idx] type=$blockType")
+        }
         val textContent = contentArray
             ?.filter { it.jsonObject["type"]?.jsonPrimitive?.content == "text" }
             ?.joinToString("") { it.jsonObject["text"]?.jsonPrimitive?.content ?: "" }
             ?: ""
+        logger.info("Anthropic Non-Stream 提取到 textContent 长度: ${textContent.length}, 前200字: ${textContent.take(200)}")
+        
+        if (textContent.isEmpty()) {
+            logger.warn("Anthropic Non-Stream textContent 为空！完整 responseBody: $responseBody")
+        }
 
         return ChatResponse(
             id = jsonObj["id"]?.jsonPrimitive?.content ?: "anthropic",
