@@ -1,5 +1,7 @@
 package com.deeptek.ai.idea.analysis
 
+import com.intellij.ide.plugins.PluginManagerCore
+import com.intellij.openapi.extensions.PluginId
 import java.time.LocalDateTime
 import java.time.format.DateTimeFormatter
 
@@ -226,15 +228,35 @@ object ReportGenerator {
     }
 
     private fun generateMetadata(sb: StringBuilder, report: ImpactReport) {
+        val pluginVersion = getPluginVersion()
         sb.appendLine("## 分析元信息")
         sb.appendLine()
         sb.appendLine("| 项目 | 值 |")
         sb.appendLine("|------|---|")
-        sb.appendLine("| **插件版本** | CodeSense AI v0.1.0 |")
+        sb.appendLine("| **插件版本** | CodeSense AI v$pluginVersion |")
         sb.appendLine("| **LLM 模型** | ${report.metadata["llmModel"] ?: "未使用"} |")
-        sb.appendLine("| **分析耗时** | ${report.analysisDuration}ms |")
+        if (report.isComplete) {
+            sb.appendLine("| **分析耗时** | ${report.analysisDuration}ms |")
+        } else {
+            sb.appendLine("| **分析耗时** | ⏳ 分析中... |")
+        }
         sb.appendLine("| **追溯深度** | ${report.maxDepth} |")
-        sb.appendLine("| **报告生成时间** | ${LocalDateTime.now().format(dateFormatter)} |")
+        if (report.isComplete) {
+            sb.appendLine("| **报告生成时间** | ${LocalDateTime.now().format(dateFormatter)} |")
+        } else {
+            sb.appendLine("| **报告生成时间** | ⏳ 分析中... |")
+        }
+    }
+
+    /**
+     * 动态获取插件版本号
+     */
+    private fun getPluginVersion(): String {
+        return try {
+            PluginManagerCore.getPlugin(PluginId.getId("com.deeptek.ai.idea"))?.version ?: "unknown"
+        } catch (e: Exception) {
+            "unknown"
+        }
     }
 
     /**

@@ -72,6 +72,19 @@ class ImpactResultPanel(private val project: Project, private val onClose: (() -
     }
 
     /**
+     * 设置完整的 Markdown 报告内容（可指定是否强制刷新）
+     * force=true 跳过节流，立即渲染（用于最终完成状态）
+     */
+    fun setMarkdownContent(markdown: String, force: Boolean) {
+        rawMarkdown = markdown
+        if (force) {
+            forceRefreshDisplay()
+        } else {
+            refreshDisplay()
+        }
+    }
+
+    /**
      * 追加 Markdown 内容（流式模式，用于 AI 风险评估部分）
      */
     fun appendMarkdown(chunk: String) {
@@ -84,7 +97,7 @@ class ImpactResultPanel(private val project: Project, private val onClose: (() -
      */
     fun showLoading(message: String = "正在分析调用链...") {
         rawMarkdown = "# ⏳ $message\n\n请稍候，分析可能需要几秒钟..."
-        refreshDisplay()
+        forceRefreshDisplay()
     }
 
     /**
@@ -92,7 +105,7 @@ class ImpactResultPanel(private val project: Project, private val onClose: (() -
      */
     fun updateLoading(message: String) {
         rawMarkdown = "# ⏳ $message\n\n请稍候，分析可能需要几秒钟..."
-        refreshDisplay()
+        forceRefreshDisplay()
     }
 
     /**
@@ -100,13 +113,45 @@ class ImpactResultPanel(private val project: Project, private val onClose: (() -
      */
     fun showError(error: String) {
         rawMarkdown += "\n\n---\n\n## ⚠️ 分析错误\n\n$error"
-        refreshDisplay()
+        forceRefreshDisplay()
     }
 
+    /** 上次实际刷新时间 */
+    @Volatile
+    private var lastRefreshTime = 0L
+    /** 是否有待刷新的内容 */
+    @Volatile
+    private var pendingRefresh = false
+
+    /**
+     * 节流刷新：最多每 200ms 刷新一次 UI，防止流式更新导致 EDT 洪水
+     */
     private fun refreshDisplay() {
+        val now = System.currentTimeMillis()
+        if (now - lastRefreshTime < 200) {
+            // 标记有待刷新，等下一次调用或强制刷新时处理
+            pendingRefresh = true
+            return
+        }
+        pendingRefresh = false
+        lastRefreshTime = now
+        doRefresh()
+    }
+
+    /**
+     * 强制立即刷新（跳过节流），用于最终状态、加载、错误等
+     */
+    private fun forceRefreshDisplay() {
+        pendingRefresh = false
+        lastRefreshTime = System.currentTimeMillis()
+        doRefresh()
+    }
+
+    private fun doRefresh() {
+        val markdownSnapshot = rawMarkdown
         invokeLater {
             // 简易 Markdown → HTML 转换
-            val html = simpleMarkdownToHtml(rawMarkdown)
+            val html = simpleMarkdownToHtml(markdownSnapshot)
             messageDisplay.text = """
                 <html><body>
                 $html

@@ -110,12 +110,14 @@ class LlmClient private constructor() {
             .build()
 
         val call = httpClient.newCall(httpRequest)
+        var response: Response? = null
 
         try {
-            val response = withContext(Dispatchers.IO) { call.execute() }
+            response = withContext(Dispatchers.IO) { call.execute() }
 
             if (!response.isSuccessful) {
                 val errorBody = response.body?.string() ?: ""
+                response.close()
                 throw LlmException("LLM API 流式错误 (HTTP ${response.code})\nURL: $fullUrl\n$errorBody")
             }
 
@@ -124,35 +126,47 @@ class LlmClient private constructor() {
             )
 
             withContext(Dispatchers.IO) {
-                var line: String?
-                while (reader.readLine().also { line = it } != null) {
-                    val data = line ?: continue
+                try {
+                    var line: String?
+                    while (reader.readLine().also { line = it } != null) {
+                        val data = line ?: continue
 
-                    // SSE 格式: "data: {...}" 或 "data: [DONE]"
-                    if (!data.startsWith("data: ")) continue
+                        // SSE 格式: "data: {...}" 或 "data: [DONE]"
+                        if (!data.startsWith("data: ")) continue
 
-                    val payload = data.removePrefix("data: ").trim()
-                    if (payload == "[DONE]") break
-                    if (payload.isEmpty()) continue
+                        val payload = data.removePrefix("data: ").trim()
+                        if (payload == "[DONE]") break
+                        if (payload.isEmpty()) continue
 
-                    try {
-                        val chunk = json.decodeFromString(ChatChunk.serializer(), payload)
-                        trySend(chunk)
-                    } catch (e: Exception) {
-                        logger.warn("Failed to parse SSE chunk: $payload", e)
+                        try {
+                            val chunk = json.decodeFromString(ChatChunk.serializer(), payload)
+                            trySend(chunk)
+                        } catch (e: Exception) {
+                            logger.warn("Failed to parse SSE chunk: $payload", e)
+                        }
                     }
+                } finally {
+                    // 确保关闭 reader 和 response body，避免连接泄漏
+                    try { reader.close() } catch (_: Exception) {}
+                    try { response.close() } catch (_: Exception) {}
                 }
             }
 
             close()
         } catch (e: IOException) {
+            response?.close()
             close(LlmException("网络连接失败: ${e.message}", e))
+        } catch (e: LlmException) {
+            response?.close()
+            close(e)
         } catch (e: Exception) {
+            response?.close()
             close(e)
         }
 
         awaitClose {
             call.cancel()
+            try { response?.close() } catch (_: Exception) {}
         }
     }
 

@@ -112,11 +112,13 @@ data class ImpactReport(
     /** AI 生成的风险评估（可选，流式填充） */
     var aiSummary: String? = null,
     /** 分析耗时 (ms) */
-    val analysisDuration: Long = 0,
+    var analysisDuration: Long = 0,
     /** 追溯深度 */
     val maxDepth: Int = 10,
     /** 额外元信息 */
-    val metadata: Map<String, String> = emptyMap()
+    val metadata: Map<String, String> = emptyMap(),
+    /** 分析是否全部完成（含 AI 任务） */
+    var isComplete: Boolean = false
 )
 
 /**

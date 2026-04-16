@@ -160,39 +160,88 @@ class ChatPanel(private val project: Project) {
         currentJob = scope.launch {
             try {
                 setStatus("AI 正在思考...")
-                logger.info("[Chat] 开始创建 Provider...")
-                val provider = LlmProviderFactory.createDefault()
-                logger.info("[Chat] Provider 创建成功: ${provider.name}, model=${provider.modelName}")
+
+                // 创建 Provider（降级处理）
+                val provider = try {
+                    logger.info("[Chat] 开始创建 Provider...")
+                    val p = LlmProviderFactory.createDefault()
+                    logger.info("[Chat] Provider 创建成功: ${p.name}, model=${p.modelName}")
+                    p
+                } catch (e: Exception) {
+                    logger.error("[Chat] Provider 创建失败: ${e.message}", e)
+                    finishAiMessage()
+                    appendErrorMessage("模型初始化失败: ${e.message}\n\n请检查 Settings → Tools → CodeSense AI 中的模型配置。")
+                    setStatus("配置错误")
+                    enableInput()
+                    return@launch
+                }
+
                 val responseBuilder = StringBuilder()
                 startAiMessage()
 
+                // 流式请求（降级处理）
+                var streamError: String? = null
                 logger.info("[Chat] 开始调用 chatCompletionStream...")
-                provider.chatCompletionStream(messages)
-                    .catch { e ->
-                        logger.error("[Chat] Stream error: ${e.javaClass.simpleName}: ${e.message}", e)
-                        appendErrorMessage("请求失败: ${e.message}")
-                    }
-                    .collect { chunk ->
-                        chunk.deltaContent?.let {
-                            responseBuilder.append(it)
-                            appendAiChunk(it)
+                try {
+                    provider.chatCompletionStream(messages)
+                        .catch { e ->
+                            logger.error("[Chat] Stream error: ${e.javaClass.simpleName}: ${e.message}", e)
+                            streamError = e.message ?: "未知流式错误"
                         }
-                    }
-                logger.info("[Chat] Stream 完成, 响应长度: ${responseBuilder.length}")
+                        .collect { chunk ->
+                            chunk.deltaContent?.let {
+                                responseBuilder.append(it)
+                                appendAiChunk(it)
+                            }
+                        }
+                } catch (e: Exception) {
+                    logger.error("[Chat] Stream 调用异常: ${e.javaClass.simpleName}: ${e.message}", e)
+                    streamError = e.message ?: "未知错误"
+                }
+                logger.info("[Chat] Stream 完成, 响应长度: ${responseBuilder.length}, streamError=$streamError")
 
                 finishAiMessage()
                 val fullResponse = responseBuilder.toString()
-                if (fullResponse.isNotEmpty()) {
-                    messages.add(ChatMessage.assistant(fullResponse))
+
+                when {
+                    // 有流式错误
+                    streamError != null && fullResponse.isEmpty() -> {
+                        appendErrorMessage("请求失败: $streamError")
+                        setStatus("请求失败")
+                    }
+                    streamError != null && fullResponse.isNotEmpty() -> {
+                        // 部分内容已接收，追加错误提示
+                        messages.add(ChatMessage.assistant(fullResponse))
+                        appendErrorMessage("⚠️ 回复可能不完整: $streamError")
+                        setStatus("回复不完整")
+                    }
+                    // 流正常结束但响应为空
+                    fullResponse.isEmpty() -> {
+                        appendErrorMessage(
+                            "AI 未返回有效回复内容。\n\n" +
+                            "可能原因：\n" +
+                            "• 当前模型 (${provider.modelName}) 返回了不兼容的响应格式\n" +
+                            "• 模型仅返回了思考过程，未生成最终回答\n" +
+                            "• API 响应被截断\n\n" +
+                            "建议：尝试切换模型或重新提问。"
+                        )
+                        setStatus("未收到回复")
+                    }
+                    // 正常
+                    else -> {
+                        messages.add(ChatMessage.assistant(fullResponse))
+                        setStatus(" ")
+                    }
                 }
-                setStatus(" ")
             } catch (e: LlmException) {
                 logger.error("[Chat] LlmException: ${e.message}", e)
-                appendErrorMessage(e.message ?: "未知错误")
+                finishAiMessage()
+                appendErrorMessage("请求失败: ${e.message}")
                 setStatus("发送失败")
             } catch (e: Exception) {
                 logger.error("[Chat] Exception: ${e.javaClass.simpleName}: ${e.message}", e)
-                appendErrorMessage("发生错误: ${e.message}")
+                finishAiMessage()
+                appendErrorMessage("发生错误: ${e.javaClass.simpleName}: ${e.message}")
                 setStatus("发送失败")
             } finally {
                 enableInput()
@@ -266,13 +315,13 @@ class ChatPanel(private val project: Project) {
         val escaped = text.replace("<", "&lt;").replace(">", "&gt;").replace("\n", "<br>")
         htmlContent.append("""<div class="user-msg"><div class="role">👤 You</div>$escaped</div>""")
         startAiMessage()
-        refreshDisplay()
+        refreshDisplay(force = true)
     }
 
     private fun appendToolMessage(label: String, content: String) {
         val escaped = content.replace("<", "&lt;").replace(">", "&gt;").replace("\n", "<br>")
         htmlContent.append("""<div class="tool-msg"><div class="tool-role">$label</div>$escaped</div>""")
-        refreshDisplay()
+        refreshDisplay(force = true)
     }
 
     private var currentAiHtml = StringBuilder()
@@ -290,18 +339,30 @@ class ChatPanel(private val project: Project) {
         if (currentAiHtml.isNotEmpty()) {
             htmlContent.append("""<div class="ai-msg"><div class="ai-role">🤖 CodeSense AI</div>$currentAiHtml</div>""")
             currentAiHtml = StringBuilder()
-            refreshDisplay()
+            refreshDisplay(force = true)
         }
     }
 
     private fun appendErrorMessage(error: String) {
         htmlContent.append("""<div class="ai-msg"><div class="error">⚠️ 错误</div>${error.replace("<", "&lt;")}</div>""")
-        refreshDisplay()
+        refreshDisplay(force = true)
     }
 
-    private fun refreshDisplay(withCurrentAi: Boolean = false) {
+    @Volatile private var lastRefreshTime = 0L
+    @Volatile private var pendingWithAi = false
+
+    private fun refreshDisplay(withCurrentAi: Boolean = false, force: Boolean = false) {
+        val now = System.currentTimeMillis()
+        if (!force && now - lastRefreshTime < 200) {
+            if (withCurrentAi) pendingWithAi = true
+            return
+        }
+        val actuallyWithAi = withCurrentAi || pendingWithAi
+        pendingWithAi = false
+        lastRefreshTime = now
+
         invokeLater {
-            val aiPart = if (withCurrentAi && currentAiHtml.isNotEmpty()) {
+            val aiPart = if (actuallyWithAi && currentAiHtml.isNotEmpty()) {
                 """<div class="ai-msg"><div class="ai-role">🤖 CodeSense AI</div>$currentAiHtml</div>"""
             } else ""
 

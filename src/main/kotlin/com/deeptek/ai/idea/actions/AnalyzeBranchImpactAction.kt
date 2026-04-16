@@ -22,6 +22,7 @@ import com.intellij.psi.search.GlobalSearchScope
 import com.intellij.psi.search.PsiShortNamesCache
 import com.intellij.ui.content.ContentFactory
 import kotlinx.coroutines.*
+import java.util.concurrent.atomic.AtomicInteger
 
 /**
  * 分析变更影响范围 Action（模式 A — Git Diff 批量分析）
@@ -75,14 +76,23 @@ class AnalyzeBranchImpactAction : AnAction() {
         toolWindow.show()
 
         var content: com.intellij.ui.content.Content? = null
+        val tabBaseTitle = "$selectedCurrent → $selectedMain"
         val resultPanel = ImpactResultPanel(project) {
             content?.let { toolWindow.contentManager.removeContent(it, true) }
         }
         content = ContentFactory.getInstance()
-            .createContent(resultPanel.getComponent(), "📊 $selectedCurrent → $selectedMain", false)
+            .createContent(resultPanel.getComponent(), "⏳ $tabBaseTitle", false)
         content.isCloseable = true
         toolWindow.contentManager.addContent(content)
         toolWindow.contentManager.setSelectedContent(content)
+
+        // Tab 标题状态更新辅助函数
+        val contentRef = content
+        fun updateTabTitle(icon: String) {
+            ApplicationManager.getApplication().invokeLater {
+                contentRef.displayName = "$icon $tabBaseTitle"
+            }
+        }
 
         resultPanel.showLoading("正在分析 $selectedCurrent vs $selectedMain 的变更影响范围...")
 
@@ -154,8 +164,9 @@ class AnalyzeBranchImpactAction : AnAction() {
 
                 val duration = System.currentTimeMillis() - startTime
 
-                val defaultProviderName = try {
-                    settings.getDefaultProvider().displayName
+                val llmModelLabel = try {
+                    val cfg = settings.getDefaultProvider()
+                    "${cfg.displayName} / ${cfg.modelName}"
                 } catch (e: Exception) { "未使用" }
 
                 // Step 4: 构建报告
@@ -173,7 +184,7 @@ class AnalyzeBranchImpactAction : AnAction() {
                     metadata = mapOf(
                         "sourceBranch" to selectedCurrent,
                         "targetBranch" to selectedMain,
-                        "llmModel" to defaultProviderName,
+                        "llmModel" to llmModelLabel,
                         "changedFileCount" to changedFileCount.toString()
                     )
                 )
@@ -183,8 +194,26 @@ class AnalyzeBranchImpactAction : AnAction() {
 
                 // Step 6: AI 风险评估（可选）
                 if (enableAi && callChains.isNotEmpty()) {
+                    updateTabTitle("🔄")
                     try {
                         val provider = LlmProviderFactory.createDefault()
+                        val aiTaskCount = AtomicInteger(0)
+                        val totalAiTasks = AtomicInteger(0)
+
+                        // 计算总 AI 任务数（必须与下方 launch 的 if 条件一致）
+                        if (uniqueEntryPoints.isNotEmpty()) totalAiTasks.incrementAndGet()
+                        totalAiTasks.incrementAndGet() // 风险评估始终有
+
+                        fun onAiTaskDone() {
+                            if (aiTaskCount.incrementAndGet() >= totalAiTasks.get()) {
+                                synchronized(report) {
+                                    report.analysisDuration = System.currentTimeMillis() - startTime
+                                    report.isComplete = true
+                                    resultPanel.setMarkdownContent(ReportGenerator.generateGitDiffReport(report), true)
+                                }
+                                updateTabTitle("✅")
+                            }
+                        }
 
                         // 异步请求 1：入口点短评
                         if (uniqueEntryPoints.isNotEmpty()) {
@@ -211,6 +240,8 @@ class AnalyzeBranchImpactAction : AnAction() {
                                     }
                                 } catch (e: Exception) {
                                     logger.warn("AI entry point explanation failed", e)
+                                } finally {
+                                    onAiTaskDone()
                                 }
                             }
                         }
@@ -242,16 +273,31 @@ class AnalyzeBranchImpactAction : AnAction() {
                                     report.aiSummary = "\n\n> ⚠️ AI 风险评估生成失败: ${e.message}"
                                     resultPanel.setMarkdownContent(ReportGenerator.generateGitDiffReport(report))
                                 }
+                            } finally {
+                                onAiTaskDone()
                             }
                         }
                     } catch (e: Exception) {
                         logger.warn("AI provider initialization failed", e)
+                        synchronized(report) {
+                            report.analysisDuration = System.currentTimeMillis() - startTime
+                            report.isComplete = true
+                            resultPanel.setMarkdownContent(ReportGenerator.generateGitDiffReport(report), true)
+                        }
+                        updateTabTitle("✅")
                     }
+                } else {
+                    synchronized(report) {
+                        report.isComplete = true
+                        resultPanel.setMarkdownContent(ReportGenerator.generateGitDiffReport(report), true)
+                    }
+                    updateTabTitle("✅")
                 }
 
             } catch (e: Exception) {
                 logger.error("Branch impact analysis failed", e)
                 resultPanel.showError("分析失败: ${e.message}")
+                updateTabTitle("❌")
             }
         }
     }

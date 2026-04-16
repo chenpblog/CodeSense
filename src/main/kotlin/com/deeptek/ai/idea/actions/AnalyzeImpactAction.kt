@@ -9,12 +9,14 @@ import com.intellij.openapi.actionSystem.ActionUpdateThread
 import com.intellij.openapi.actionSystem.AnAction
 import com.intellij.openapi.actionSystem.AnActionEvent
 import com.intellij.openapi.actionSystem.CommonDataKeys
+import com.intellij.openapi.application.ApplicationManager
 import com.intellij.openapi.application.runReadAction
 import com.intellij.openapi.diagnostic.Logger
 import com.intellij.openapi.ui.Messages
 import com.intellij.openapi.wm.ToolWindowManager
 import com.intellij.ui.content.ContentFactory
 import kotlinx.coroutines.*
+import java.util.concurrent.atomic.AtomicInteger
 
 /**
  * 分析影响范围 Action（模式 B — 指定方法分析）
@@ -55,14 +57,23 @@ class AnalyzeImpactAction : AnAction() {
         toolWindow.show()
 
         var content: com.intellij.ui.content.Content? = null
+        val tabBaseTitle = methodName
         val resultPanel = ImpactResultPanel(project) {
             content?.let { toolWindow.contentManager.removeContent(it, true) }
         }
         content = ContentFactory.getInstance()
-            .createContent(resultPanel.getComponent(), "🔍 $methodName", false)
+            .createContent(resultPanel.getComponent(), "⏳ $tabBaseTitle", false)
         content.isCloseable = true
         toolWindow.contentManager.addContent(content)
         toolWindow.contentManager.setSelectedContent(content)
+
+        // Tab 标题状态更新辅助函数
+        val contentRef = content
+        fun updateTabTitle(icon: String) {
+            ApplicationManager.getApplication().invokeLater {
+                contentRef.displayName = "$icon $tabBaseTitle"
+            }
+        }
 
         resultPanel.showLoading("正在分析 $methodName 的影响范围...")
 
@@ -83,7 +94,10 @@ class AnalyzeImpactAction : AnAction() {
 
                 val duration = System.currentTimeMillis() - startTime
 
-                val defaultProviderName = try { settings.getDefaultProvider().displayName } catch (e: Exception) { "未使用" }
+                val llmModelLabel = try {
+                    val cfg = settings.getDefaultProvider()
+                    "${cfg.displayName} / ${cfg.modelName}"
+                } catch (e: Exception) { "未使用" }
 
                 // Step 2: 构建 ImpactReport
                 val report = ImpactReport(
@@ -93,7 +107,7 @@ class AnalyzeImpactAction : AnAction() {
                     entryPoints = entryPoints,
                     analysisDuration = duration,
                     maxDepth = maxDepth,
-                    metadata = mapOf("llmModel" to defaultProviderName)
+                    metadata = mapOf("llmModel" to llmModelLabel)
                 )
 
                 // Step 3: 生成初始 Markdown 报告
@@ -101,8 +115,26 @@ class AnalyzeImpactAction : AnAction() {
 
                 // Step 4: 可选 — AI 风险评估与短评 (方案 B: 双重异步请求)
                 if (enableAi) {
+                    updateTabTitle("🔄")
                     try {
                         val provider = LlmProviderFactory.createDefault()
+                        val aiTaskCount = AtomicInteger(0)
+                        val totalAiTasks = AtomicInteger(0)
+
+                        // 计算总 AI 任务数（必须与下方 launch 的 if 条件一致）
+                        if (report.entryPoints.isNotEmpty()) totalAiTasks.incrementAndGet()
+                        totalAiTasks.incrementAndGet() // 风险评估始终有
+
+                        fun onAiTaskDone() {
+                            if (aiTaskCount.incrementAndGet() >= totalAiTasks.get()) {
+                                synchronized(report) {
+                                    report.analysisDuration = System.currentTimeMillis() - startTime
+                                    report.isComplete = true
+                                    resultPanel.setMarkdownContent(ReportGenerator.generateSingleMethodReport(report, biTree), true)
+                                }
+                                updateTabTitle("✅")
+                            }
+                        }
 
                         // 异步请求 1：所有受影响入口点的短评（三层 fallback）
                         if (report.entryPoints.isNotEmpty()) {
@@ -142,6 +174,8 @@ class AnalyzeImpactAction : AnAction() {
                                     }
                                 } catch (e: Exception) {
                                     logger.warn("AI entry point explanation failed", e)
+                                } finally {
+                                    onAiTaskDone()
                                 }
                             }
                         }
@@ -173,17 +207,32 @@ class AnalyzeImpactAction : AnAction() {
                                     report.aiSummary = "\n\n> ⚠️ AI 风险评估生成失败: ${e.message}"
                                     resultPanel.setMarkdownContent(ReportGenerator.generateSingleMethodReport(report, biTree))
                                 }
+                            } finally {
+                                onAiTaskDone()
                             }
                         }
 
                     } catch (e: Exception) {
                         logger.warn("AI provider initialization failed", e)
+                        synchronized(report) {
+                            report.analysisDuration = System.currentTimeMillis() - startTime
+                            report.isComplete = true
+                            resultPanel.setMarkdownContent(ReportGenerator.generateSingleMethodReport(report, biTree), true)
+                        }
+                        updateTabTitle("✅")
                     }
+                } else {
+                    synchronized(report) {
+                        report.isComplete = true
+                        resultPanel.setMarkdownContent(ReportGenerator.generateSingleMethodReport(report, biTree), true)
+                    }
+                    updateTabTitle("✅")
                 }
 
             } catch (e: Exception) {
                 logger.error("Impact analysis failed", e)
                 resultPanel.showError("分析失败: ${e.message}")
+                updateTabTitle("❌")
             }
         }
     }

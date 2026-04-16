@@ -61,8 +61,9 @@ class AnthropicCompatProvider(private val config: ProviderConfig) : LlmProvider 
 
         val requestBody = buildJsonObject {
             put("model", config.modelName)
-            put("max_tokens", config.maxTokens)
+            put("max_tokens", maxTokens ?: config.maxTokens)
             put("stream", true)
+            put("temperature", temperature ?: config.temperature)
             if (systemPrompt != null) {
                 put("system", systemPrompt)
             }
@@ -107,12 +108,14 @@ class AnthropicCompatProvider(private val config: ProviderConfig) : LlmProvider 
             .build()
 
         val call = httpClient.newCall(httpRequest)
+        var response: Response? = null
 
         try {
-            val response = withContext(Dispatchers.IO) { call.execute() }
+            response = withContext(Dispatchers.IO) { call.execute() }
 
             if (!response.isSuccessful) {
                 val errorBody = response.body?.string() ?: ""
+                response.close()
                 throw LlmException(
                     "LLM API 流式错误 (HTTP ${response.code})\nURL: ${config.baseUrl}\n$errorBody"
                 )
@@ -123,100 +126,112 @@ class AnthropicCompatProvider(private val config: ProviderConfig) : LlmProvider 
             )
 
             withContext(Dispatchers.IO) {
-                var currentEvent = ""
-                var line: String?
-                var lineCount = 0
+                try {
+                    var currentEvent = ""
+                    var line: String?
+                    var lineCount = 0
 
-                while (reader.readLine().also { line = it } != null) {
-                    val data = line ?: continue
-                    lineCount++
+                    while (reader.readLine().also { line = it } != null) {
+                        val data = line ?: continue
+                        lineCount++
 
-                    // 前 20 行打印原始内容以便调试
-                    if (lineCount <= 20) {
-                        logger.info("[SSE] 第${lineCount}行原始数据: '$data'")
-                    }
-
-                    // Anthropic SSE 格式:
-                    // event: content_block_delta
-                    // data: {"type":"content_block_delta","index":0,"delta":{"type":"text_delta","text":"Hello"}}
-                    when {
-                        data.startsWith("event: ") -> {
-                            currentEvent = data.removePrefix("event: ").trim()
-                            if (lineCount <= 20) logger.info("[SSE] event=$currentEvent")
+                        // 前 20 行打印原始内容以便调试
+                        if (lineCount <= 20) {
+                            logger.info("[SSE] 第${lineCount}行原始数据: '$data'")
                         }
-                        data.startsWith("data: ") -> {
-                            val payload = data.removePrefix("data: ").trim()
-                            if (payload.isEmpty()) continue
 
-                            try {
-                                val jsonObj = json.parseToJsonElement(payload).jsonObject
-                                val type = jsonObj["type"]?.jsonPrimitive?.content ?: ""
+                        // Anthropic SSE 格式:
+                        // event: content_block_delta
+                        // data: {"type":"content_block_delta","index":0,"delta":{"type":"text_delta","text":"Hello"}}
+                        when {
+                            data.startsWith("event: ") -> {
+                                currentEvent = data.removePrefix("event: ").trim()
+                                if (lineCount <= 20) logger.info("[SSE] event=$currentEvent")
+                            }
+                            data.startsWith("data: ") -> {
+                                val payload = data.removePrefix("data: ").trim()
+                                if (payload.isEmpty()) continue
 
-                                if (lineCount <= 20) logger.info("[SSE] data type=$type, keys=${jsonObj.keys}")
+                                try {
+                                    val jsonObj = json.parseToJsonElement(payload).jsonObject
+                                    val type = jsonObj["type"]?.jsonPrimitive?.content ?: ""
 
-                                when (type) {
-                                    "content_block_delta" -> {
-                                        val delta = jsonObj["delta"]?.jsonObject
-                                        val deltaType = delta?.get("type")?.jsonPrimitive?.content
-                                        if (deltaType == "text_delta") {
-                                            val text = delta["text"]?.jsonPrimitive?.content ?: ""
-                                            if (text.isNotEmpty()) {
-                                                trySend(ChatChunk(
-                                                    id = "anthropic",
-                                                    choices = listOf(
-                                                        ChunkChoice(
-                                                            index = 0,
-                                                            delta = DeltaMessage(
-                                                                role = "assistant",
-                                                                content = text
-                                                            ),
-                                                            finishReason = null
+                                    if (lineCount <= 20) logger.info("[SSE] data type=$type, keys=${jsonObj.keys}")
+
+                                    when (type) {
+                                        "content_block_delta" -> {
+                                            val delta = jsonObj["delta"]?.jsonObject
+                                            val deltaType = delta?.get("type")?.jsonPrimitive?.content
+                                            if (deltaType == "text_delta") {
+                                                val text = delta["text"]?.jsonPrimitive?.content ?: ""
+                                                if (text.isNotEmpty()) {
+                                                    trySend(ChatChunk(
+                                                        id = "anthropic",
+                                                        choices = listOf(
+                                                            ChunkChoice(
+                                                                index = 0,
+                                                                delta = DeltaMessage(
+                                                                    role = "assistant",
+                                                                    content = text
+                                                                ),
+                                                                finishReason = null
+                                                            )
                                                         )
-                                                    )
-                                                ))
+                                                    ))
+                                                }
+                                            } else {
+                                                logger.info("[SSE] content_block_delta 但 deltaType=$deltaType (非 text_delta), delta=$delta")
                                             }
-                                        } else {
-                                            logger.info("[SSE] content_block_delta 但 deltaType=$deltaType (非 text_delta), delta=$delta")
+                                        }
+                                        "message_stop" -> {
+                                            logger.info("[SSE] 收到 message_stop, 总行数=$lineCount")
+                                            break
+                                        }
+                                        "error" -> {
+                                            val errorMsg = jsonObj["error"]?.jsonObject
+                                                ?.get("message")?.jsonPrimitive?.content
+                                                ?: payload
+                                            throw LlmException("Anthropic API Error: $errorMsg")
+                                        }
+                                        else -> {
+                                            if (lineCount <= 20) logger.info("[SSE] 未处理的 type=$type, payload=${payload.take(200)}")
                                         }
                                     }
-                                    "message_stop" -> {
-                                        logger.info("[SSE] 收到 message_stop, 总行数=$lineCount")
-                                        break
-                                    }
-                                    "error" -> {
-                                        val errorMsg = jsonObj["error"]?.jsonObject
-                                            ?.get("message")?.jsonPrimitive?.content
-                                            ?: payload
-                                        throw LlmException("Anthropic API Error: $errorMsg")
-                                    }
-                                    else -> {
-                                        if (lineCount <= 20) logger.info("[SSE] 未处理的 type=$type, payload=${payload.take(200)}")
-                                    }
+                                } catch (e: LlmException) {
+                                    throw e
+                                } catch (e: Exception) {
+                                    logger.warn("Failed to parse Anthropic SSE: $payload", e)
                                 }
-                            } catch (e: LlmException) {
-                                throw e
-                            } catch (e: Exception) {
-                                logger.warn("Failed to parse Anthropic SSE: $payload", e)
+                            }
+                            data.isNotBlank() -> {
+                                if (lineCount <= 20) logger.info("[SSE] 非 event/data 行: '$data'")
                             }
                         }
-                        data.isNotBlank() -> {
-                            if (lineCount <= 20) logger.info("[SSE] 非 event/data 行: '$data'")
-                        }
                     }
+                    logger.info("[SSE] 流式读取结束, 总行数=$lineCount")
+                } finally {
+                    // 确保关闭 reader 和 response body，避免连接泄漏
+                    try { reader.close() } catch (_: Exception) {}
+                    try { response.close() } catch (_: Exception) {}
                 }
-                logger.info("[SSE] 流式读取结束, 总行数=$lineCount")
             }
 
             close()
         } catch (e: java.io.IOException) {
+            response?.close()
             close(LlmException("网络连接失败: ${e.message}", e))
         } catch (e: LlmException) {
+            response?.close()
             close(e)
         } catch (e: Exception) {
+            response?.close()
             close(e)
         }
 
-        awaitClose { call.cancel() }
+        awaitClose {
+            call.cancel()
+            try { response?.close() } catch (_: Exception) {}
+        }
     }
 
     override suspend fun chatCompletion(
@@ -229,8 +244,9 @@ class AnthropicCompatProvider(private val config: ProviderConfig) : LlmProvider 
 
         val requestBody = buildJsonObject {
             put("model", config.modelName)
-            put("max_tokens", config.maxTokens)
+            put("max_tokens", maxTokens ?: config.maxTokens)
             put("stream", false)
+            put("temperature", temperature ?: config.temperature)
             if (systemPrompt != null) {
                 put("system", systemPrompt)
             }
@@ -239,6 +255,23 @@ class AnthropicCompatProvider(private val config: ProviderConfig) : LlmProvider 
                     addJsonObject {
                         put("role", msg.first)
                         put("content", msg.second)
+                    }
+                }
+            }
+            // Anthropic 格式的工具定义（如有）
+            if (!tools.isNullOrEmpty()) {
+                putJsonArray("tools") {
+                    tools.forEach { tool ->
+                        addJsonObject {
+                            put("name", tool.function.name)
+                            put("description", tool.function.description)
+                            putJsonObject("input_schema") {
+                                val params = tool.function.parameters
+                                if (params is JsonObject) {
+                                    params.entries.forEach { (k, v) -> put(k, v) }
+                                }
+                            }
+                        }
                     }
                 }
             }
@@ -312,6 +345,18 @@ class AnthropicCompatProvider(private val config: ProviderConfig) : LlmProvider 
             converted.add(0, "user" to "Hello")
         }
 
-        return systemPrompt to converted
+        // Anthropic 要求不能有连续的同角色消息，需要合并
+        val merged = mutableListOf<Pair<String, String>>()
+        for (msg in converted) {
+            if (merged.isNotEmpty() && merged.last().first == msg.first) {
+                // 合并相邻同角色消息
+                val last = merged.removeAt(merged.lastIndex)
+                merged.add(last.first to "${last.second}\n\n${msg.second}")
+            } else {
+                merged.add(msg)
+            }
+        }
+
+        return systemPrompt to merged
     }
 }
