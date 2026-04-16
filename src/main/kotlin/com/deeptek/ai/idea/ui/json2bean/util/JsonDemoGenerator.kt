@@ -21,6 +21,7 @@ object JsonDemoGenerator {
         val finalElement = if (isRootList) {
             val array = JsonArray()
             array.add(rootElement)
+            array.add(traverseNode(rootNode)) // 生成第2个元素
             array
         } else {
             rootElement
@@ -41,12 +42,15 @@ object JsonDemoGenerator {
             }
             node.type == "List<Object>" -> {
                 val array = JsonArray()
-                val itemObj = JsonObject()
-                for (i in 0 until node.childCount) {
-                    val child = node.getChildAt(i) as JsonPropertyNode
-                    itemObj.add(child.fieldName, traverseNode(child))
+                // 生成 2 个元素，让 demo 更直观地体现 List 结构
+                repeat(2) {
+                    val itemObj = JsonObject()
+                    for (i in 0 until node.childCount) {
+                        val child = node.getChildAt(i) as JsonPropertyNode
+                        itemObj.add(child.fieldName, traverseNode(child))
+                    }
+                    array.add(itemObj)
                 }
-                array.add(itemObj)
                 return array
             }
             else -> {

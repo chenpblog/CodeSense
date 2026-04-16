@@ -36,10 +36,12 @@ class JsonDesignDialog(
     private lateinit var rootNode: JsonPropertyNode
     private lateinit var rootTypeComboBox: ComboBox<String>
     private lateinit var classNameField: JBTextField
+    private lateinit var classDescField: JBTextField
 
     companion object {
         var savedRootNode: JsonPropertyNode? = null
         var savedClassName: String = "RootRes"
+        var savedClassDesc: String = ""
         var savedRootTypeIndex: Int = 0
     }
 
@@ -94,6 +96,16 @@ class JsonDesignDialog(
         // 包含到 ScrollPane
         val scrollPane = JBScrollPane(treeTable)
         scrollPane.preferredSize = Dimension(650, 400)
+
+        // 默认全部展开
+        com.intellij.openapi.application.ApplicationManager.getApplication().invokeLater {
+            val tree = treeTable.tree
+            var row = 0
+            while (row < tree.rowCount) {
+                tree.expandRow(row)
+                row++
+            }
+        }
         
         // 顶部工具栏 (Add/Remove 节点)
         val toolbarPanel = JPanel(FlowLayout(FlowLayout.LEFT))
@@ -246,6 +258,32 @@ class JsonDesignDialog(
                 }
             }
         })
+
+        // 点击事件：全部展开/折叠
+        val expandAllBtn = com.intellij.ui.components.JBLabel("<html><a href=''>▸ 全部展开</a></html>")
+        expandAllBtn.setCursor(java.awt.Cursor.getPredefinedCursor(java.awt.Cursor.HAND_CURSOR))
+        expandAllBtn.addMouseListener(object : java.awt.event.MouseAdapter() {
+            private var expanded = false
+            override fun mouseClicked(e: java.awt.event.MouseEvent?) {
+                val tree = treeTable.tree
+                if (!expanded) {
+                    // 展开所有节点
+                    var row = 0
+                    while (row < tree.rowCount) {
+                        tree.expandRow(row)
+                        row++
+                    }
+                    expandAllBtn.text = "<html><a href=''>▾ 全部折叠</a></html>"
+                } else {
+                    // 折叠所有节点（保留 Root 展开）
+                    for (row in tree.rowCount - 1 downTo 1) {
+                        tree.collapseRow(row)
+                    }
+                    expandAllBtn.text = "<html><a href=''>▸ 全部展开</a></html>"
+                }
+                expanded = !expanded
+            }
+        })
         
         toolbarPanel.add(addBtn)
         toolbarPanel.add(JBLabel("  |  "))
@@ -254,6 +292,8 @@ class JsonDesignDialog(
         toolbarPanel.add(removeBtn)
         toolbarPanel.add(JBLabel("  |  "))
         toolbarPanel.add(newJsonBtn)
+        toolbarPanel.add(JBLabel("  |  "))
+        toolbarPanel.add(expandAllBtn)
 
         val topPanel = JPanel(BorderLayout())
         topPanel.add(toolbarPanel, BorderLayout.WEST)
@@ -275,8 +315,13 @@ class JsonDesignDialog(
         bottomPanel.add(rootTypeComboBox)
         
         bottomPanel.add(JBLabel("    Class Name:"))
-        classNameField = JBTextField(savedClassName, 15)
+        classNameField = JBTextField(savedClassName, 12)
         bottomPanel.add(classNameField)
+        
+        bottomPanel.add(JBLabel("    Class 描述:"))
+        classDescField = JBTextField(savedClassDesc, 20)
+        classDescField.toolTipText = "用于生成 Class 顶部的 JavaDoc 注释"
+        bottomPanel.add(classDescField)
         
         mainPanel.add(bottomPanel, BorderLayout.SOUTH)
 
@@ -290,11 +335,16 @@ class JsonDesignDialog(
         }
 
         val className = classNameField.text.trim().takeIf { it.isNotEmpty() } ?: "RootRes"
+        val classDesc = classDescField.text.trim()
         val isList = rootTypeComboBox.selectedIndex == 1
         
         // 记录状态到内存中
         savedClassName = className
+        savedClassDesc = classDesc
         savedRootTypeIndex = rootTypeComboBox.selectedIndex
+        
+        // 将 class 描述写入 rootNode，供代码生成使用
+        rootNode.description = classDesc
         
         // 组装 JSON
         val demoJson = JsonDemoGenerator.generateDemoJson(rootNode, isRootList = isList)

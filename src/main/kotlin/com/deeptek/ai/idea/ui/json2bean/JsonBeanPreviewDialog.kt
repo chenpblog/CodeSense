@@ -5,14 +5,10 @@ import com.intellij.openapi.application.ApplicationManager
 import com.intellij.openapi.command.WriteCommandAction
 import com.intellij.openapi.editor.EditorFactory
 import com.intellij.openapi.editor.ex.EditorEx
-import com.intellij.openapi.fileChooser.FileChooserDescriptorFactory
-import com.intellij.openapi.fileChooser.FileChooserDialog
-import com.intellij.openapi.fileChooser.FileChooserFactory
 import com.intellij.openapi.project.Project
 import com.intellij.openapi.ui.DialogWrapper
 import com.intellij.openapi.ui.Messages
 import com.intellij.openapi.vfs.VirtualFile
-import com.intellij.psi.PsiManager
 import com.intellij.ui.JBSplitter
 import com.intellij.ui.components.JBLabel
 import com.intellij.util.ui.JBUI
@@ -100,8 +96,15 @@ class JsonBeanPreviewDialog(
 
         val copyJsonBtn = JButton("Copy JSON")
         copyJsonBtn.addActionListener {
-            copyToClipboard(jsonContent)
-            setStatus("✓ JSON 已复制到剪贴板")
+            val englishJson = jsonEnglishEditor.document.text.trim()
+            val hasEnglishJson = englishJson.isNotEmpty() && (englishJson.startsWith("{") || englishJson.startsWith("["))
+            if (hasEnglishJson) {
+                copyToClipboard(englishJson)
+                setStatus("✓ 已复制 AI 转换后的 English JSON")
+            } else {
+                copyToClipboard(jsonContent)
+                setStatus("✓ 已复制原始 JSON")
+            }
         }
 
         val copyJavaBtn = JButton("Copy Java Bean")
@@ -139,16 +142,24 @@ class JsonBeanPreviewDialog(
         return rootPanel
     }
 
+    // 当前活跃的自动清除定时器（避免多个 Timer 并发冲突）
+    private var statusClearTimer: javax.swing.Timer? = null
+
     /**
      * 在底部状态栏显示提示文字（替代 Balloon，避免 Disposer 内存泄漏）
+     * @param autoClear 是否 3 秒后自动清除，加载中的提示应传 false 保持显示
      */
-    private fun setStatus(message: String, isError: Boolean = false) {
+    private fun setStatus(message: String, isError: Boolean = false, autoClear: Boolean = true) {
+        statusClearTimer?.stop()
+        statusClearTimer = null
         statusLabel.foreground = if (isError) java.awt.Color(220, 80, 80) else java.awt.Color(100, 180, 100)
         statusLabel.text = message
-        // 3秒后自动清除
-        javax.swing.Timer(3000) { statusLabel.text = " " }.apply {
-            isRepeats = false
-            start()
+        if (autoClear) {
+            // 3秒后自动清除
+            statusClearTimer = javax.swing.Timer(3000) { statusLabel.text = " " }.apply {
+                isRepeats = false
+                start()
+            }
         }
     }
 
@@ -159,7 +170,7 @@ class JsonBeanPreviewDialog(
      */
     private fun safeSetEditorText(editor: EditorEx, text: String) {
         if (editor.isDisposed) {
-            logger.error("[safeSetEditorText] 编辑器已被 disposed，跳过 setText")
+            logger.warn("[safeSetEditorText] 编辑器已被 disposed，跳过 setText（对话框可能已关闭）")
             return
         }
         try {
@@ -194,49 +205,58 @@ class JsonBeanPreviewDialog(
 
     private fun generateFile(btn: JButton) {
         modifiedJavaContent = javaEditor.document.text
-        val descriptor = FileChooserDescriptorFactory.createSingleFolderDescriptor()
-        descriptor.title = "Select Package/Directory to Save $className.java"
         
-        val chooser: FileChooserDialog = FileChooserFactory.getInstance().createFileChooser(descriptor, project, null)
-        val chosenFiles = chooser.choose(project, targetDirectory)
+        // 使用 IntelliJ 的 Package 选择器，显示工程的 Java 包结构树
+        val packageChooser = com.intellij.ide.util.PackageChooserDialog(
+            "Select Package to Save $className.java", project
+        )
+        packageChooser.show()
         
-        if (chosenFiles.isNotEmpty()) {
-            val destDir = chosenFiles[0]
-            WriteCommandAction.runWriteCommandAction(project) {
-                try {
-                    val existingFile = destDir.findChild("$className.java")
-                    val targetFile = if (existingFile != null) {
-                        val result = Messages.showYesNoDialog(
-                            project,
-                            "文件 $className.java 已存在，是否覆盖？",
-                            "File Exists",
-                            Messages.getWarningIcon()
-                        )
-                        if (result == Messages.YES) existingFile else null
-                    } else {
-                        destDir.createChildData(this, "$className.java")
-                    }
+        val selectedPackage = packageChooser.selectedPackage ?: return
+        val pkgName = selectedPackage.qualifiedName
+        
+        // 获取该 package 对应的目录（若有多个 source root 取第一个）
+        val directories = selectedPackage.directories
+        if (directories.isEmpty()) {
+            setStatus("✗ 无法找到包 $pkgName 对应的目录", isError = true)
+            return
+        }
+        val destPsiDir = directories[0]
+        val destDir = destPsiDir.virtualFile
+        
+        WriteCommandAction.runWriteCommandAction(project) {
+            try {
+                val existingFile = destDir.findChild("$className.java")
+                val targetFile = if (existingFile != null) {
+                    val result = Messages.showYesNoDialog(
+                        project,
+                        "文件 $className.java 已存在于 $pkgName，是否覆盖？",
+                        "File Exists",
+                        Messages.getWarningIcon()
+                    )
+                    if (result == Messages.YES) existingFile else null
+                } else {
+                    destDir.createChildData(this, "$className.java")
+                }
 
-                    targetFile?.let {
-                        it.setBinaryContent(modifiedJavaContent.toByteArray(Charsets.UTF_8))
-                        val psiDir = PsiManager.getInstance(project).findDirectory(destDir)
-                        val pkgName = com.intellij.psi.JavaDirectoryService.getInstance()?.getPackage(psiDir!!)?.qualifiedName
-                        
-                        if (!pkgName.isNullOrEmpty() && !modifiedJavaContent.contains("package ")) {
-                            val withPackage = "package $pkgName;\n\n$modifiedJavaContent"
-                            it.setBinaryContent(withPackage.toByteArray(Charsets.UTF_8))
-                        }
-                        
-                        ApplicationManager.getApplication().invokeLater {
-                            com.intellij.openapi.fileEditor.FileEditorManager.getInstance(project).openFile(it, true)
-                            close(OK_EXIT_CODE)
-                        }
+                targetFile?.let {
+                    // 自动补 package 声明
+                    val finalContent = if (pkgName.isNotEmpty() && !modifiedJavaContent.contains("package ")) {
+                        "package $pkgName;\n\n$modifiedJavaContent"
+                    } else {
+                        modifiedJavaContent
                     }
-                } catch (e: Exception) {
-                    logger.error("[生成文件] 写入出错: ${e.message}", e)
+                    it.setBinaryContent(finalContent.toByteArray(Charsets.UTF_8))
+                    
                     ApplicationManager.getApplication().invokeLater {
-                        setStatus("✗ 写入文件出错: ${e.message}", isError = true)
+                        com.intellij.openapi.fileEditor.FileEditorManager.getInstance(project).openFile(it, true)
+                        close(OK_EXIT_CODE)
                     }
+                }
+            } catch (e: Exception) {
+                logger.error("[生成文件] 写入出错: ${e.message}", e)
+                ApplicationManager.getApplication().invokeLater {
+                    setStatus("✗ 写入文件出错: ${e.message}", isError = true)
                 }
             }
         }
@@ -246,7 +266,7 @@ class JsonBeanPreviewDialog(
         logger.info("[AI转换] 开始, jsonContent长度=${jsonContent.length}")
         btn.isEnabled = false
         btn.text = "AI 转换中..."
-        setStatus("⏳ 正在调用 AI 翻译...")
+        setStatus("⏳ 正在调用 AI 翻译...", autoClear = false)
         
         ApplicationManager.getApplication().executeOnPooledThread {
             kotlinx.coroutines.runBlocking {
@@ -279,6 +299,11 @@ class JsonBeanPreviewDialog(
                     javax.swing.SwingUtilities.invokeLater {
                         try {
                             logger.info("[AI转换] invokeLater 开始执行, 线程=${Thread.currentThread().name}")
+                            // 对话框已关闭时直接跳过所有 UI 操作
+                            if (isDisposed || jsonEnglishEditor.isDisposed) {
+                                logger.info("[AI转换] 对话框或编辑器已 disposed，跳过 UI 更新")
+                                return@invokeLater
+                            }
                             safeSetEditorText(jsonEnglishEditor, englishJson)
                             
                             if (englishJson.isEmpty()) {
@@ -299,6 +324,7 @@ class JsonBeanPreviewDialog(
                     logger.error("[AI转换] 异常: ${e.javaClass.simpleName}: ${e.message}", e)
                     javax.swing.SwingUtilities.invokeLater {
                         try {
+                            if (isDisposed) return@invokeLater
                             btn.text = "AI 转换"
                             btn.isEnabled = true
                             setStatus("✗ AI 转换错误: ${e.message ?: "未知错误"}", isError = true)
