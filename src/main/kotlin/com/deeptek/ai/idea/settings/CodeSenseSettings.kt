@@ -38,6 +38,7 @@ class CodeSenseSettings : PersistentStateComponent<CodeSenseSettings.State> {
                 id = "minimax-default",
                 displayName = "MiniMax",
                 type = ProviderType.MINIMAX,
+                apiProtocol = ApiProtocol.ANTHROPIC_COMPATIBLE,
                 baseUrl = ProviderType.MINIMAX.defaultBaseUrl,
                 modelName = ProviderType.MINIMAX.defaultModel,
                 apiKey = ""
@@ -47,6 +48,7 @@ class CodeSenseSettings : PersistentStateComponent<CodeSenseSettings.State> {
                 id = "glm-default",
                 displayName = "GLM (智谱)",
                 type = ProviderType.GLM,
+                apiProtocol = ApiProtocol.OPENAI_COMPATIBLE,
                 baseUrl = ProviderType.GLM.defaultBaseUrl,
                 modelName = ProviderType.GLM.defaultModel,
                 apiKey = ""

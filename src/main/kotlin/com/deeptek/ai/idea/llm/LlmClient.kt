@@ -43,45 +43,96 @@ class LlmClient private constructor() {
 
     private val jsonMediaType = "application/json; charset=utf-8".toMediaType()
 
+    companion object {
+        /** 可重试的 HTTP 状态码：服务过载、限流、服务端临时故障 */
+        private val RETRYABLE_STATUS_CODES = setOf(429, 500, 502, 503, 529)
+        private const val MAX_RETRIES = 3
+        private const val INITIAL_DELAY_MS = 1000L
+
+        @Volatile
+        private var instance: LlmClient? = null
+
+        fun getInstance(): LlmClient {
+            return instance ?: synchronized(this) {
+                instance ?: LlmClient().also { instance = it }
+            }
+        }
+    }
+
     /**
-     * 非流式 Chat Completion 请求
+     * 非流式 Chat Completion 请求（含自动重试）
      */
     suspend fun chatCompletion(
         baseUrl: String,
         apiKey: String,
         request: ChatRequest
-    ): ChatResponse = withContext(Dispatchers.IO) {
+    ): ChatResponse {
         val requestBody = json.encodeToString(ChatRequest.serializer(), request.copy(stream = false))
-
         logger.debug("LLM Request: model=${request.model}, messages=${request.messages.size}")
 
-        val httpRequest = Request.Builder()
-            .url(baseUrl)
-            .header("Authorization", "Bearer $apiKey")
-            .header("Content-Type", "application/json")
-            .post(requestBody.toRequestBody(jsonMediaType))
-            .build()
+        var lastException: Exception? = null
 
-        val response = httpClient.newCall(httpRequest).execute()
-        val responseBody = response.body?.string()
-            ?: throw LlmException("Empty response body")
-
-        if (!response.isSuccessful) {
-            val error = try {
-                json.decodeFromString(ApiError.serializer(), responseBody)
-            } catch (e: Exception) {
-                null
+        for (attempt in 0..MAX_RETRIES) {
+            if (attempt > 0) {
+                val delayMs = INITIAL_DELAY_MS * (1L shl (attempt - 1)) // 指数退避: 1s, 2s, 4s
+                logger.info("LLM Non-Stream 第 ${attempt}/${MAX_RETRIES} 次重试, 等待 ${delayMs}ms...")
+                kotlinx.coroutines.delay(delayMs)
             }
-            throw LlmException(
-                "LLM API 错误 (HTTP ${response.code}): " +
-                (error?.error?.message ?: responseBody)
-            )
+
+            try {
+                val httpRequest = Request.Builder()
+                    .url(baseUrl)
+                    .header("Authorization", "Bearer $apiKey")
+                    .header("Content-Type", "application/json")
+                    .post(requestBody.toRequestBody(jsonMediaType))
+                    .build()
+
+                val response = withContext(Dispatchers.IO) { httpClient.newCall(httpRequest).execute() }
+                val responseBody = response.body?.string()
+                    ?: throw LlmException("Empty response body")
+
+                if (!response.isSuccessful) {
+                    if (response.code in RETRYABLE_STATUS_CODES && attempt < MAX_RETRIES) {
+                        logger.warn("LLM Non-Stream 可重试错误 (HTTP ${response.code}), 将进行重试: $responseBody")
+                        lastException = LlmException(
+                            "LLM API 错误 (HTTP ${response.code}): $responseBody"
+                        )
+                        continue
+                    }
+                    val error = try {
+                        json.decodeFromString(ApiError.serializer(), responseBody)
+                    } catch (e: Exception) {
+                        null
+                    }
+                    throw LlmException(
+                        "LLM API 错误 (HTTP ${response.code}): " +
+                        (error?.error?.message ?: responseBody)
+                    )
+                }
+
+                val chatResponse = json.decodeFromString(ChatResponse.serializer(), responseBody)
+                logger.debug("LLM Response: choices=${chatResponse.choices.size}, " +
+                    "usage=${chatResponse.usage?.totalTokens} tokens")
+
+                if (attempt > 0) {
+                    logger.info("LLM Non-Stream 第 ${attempt} 次重试成功")
+                }
+
+                return chatResponse
+            } catch (e: LlmException) {
+                lastException = e
+                throw e
+            } catch (e: java.io.IOException) {
+                lastException = e
+                if (attempt < MAX_RETRIES) {
+                    logger.warn("LLM Non-Stream 网络异常, 将进行重试: ${e.message}")
+                    continue
+                }
+                throw LlmException("网络连接失败 (已重试 $MAX_RETRIES 次): ${e.message}", e)
+            }
         }
 
-        val chatResponse = json.decodeFromString(ChatResponse.serializer(), responseBody)
-        logger.debug("LLM Response: choices=${chatResponse.choices.size}, " +
-            "usage=${chatResponse.usage?.totalTokens} tokens")
-        chatResponse
+        throw lastException ?: LlmException("未知错误: 重试耗尽")
     }
 
     /**
@@ -167,17 +218,6 @@ class LlmClient private constructor() {
         awaitClose {
             call.cancel()
             try { response?.close() } catch (_: Exception) {}
-        }
-    }
-
-    companion object {
-        @Volatile
-        private var instance: LlmClient? = null
-
-        fun getInstance(): LlmClient {
-            return instance ?: synchronized(this) {
-                instance ?: LlmClient().also { instance = it }
-            }
         }
     }
 }

@@ -26,7 +26,7 @@ object LlmProviderFactory {
      * - ANTHROPIC_COMPATIBLE → AnthropicCompatProvider（x-api-key + Anthropic SSE 格式）
      */
     fun create(config: ProviderConfig): LlmProvider {
-        val protocol = config.type.apiProtocol
+        val protocol = config.apiProtocol
         logger.info("创建 LlmProvider: name=${config.displayName}, model=${config.modelName}, url=${config.baseUrl}, protocol=$protocol")
         return when (protocol) {
             ApiProtocol.OPENAI_COMPATIBLE -> OpenAiCompatProvider(config)

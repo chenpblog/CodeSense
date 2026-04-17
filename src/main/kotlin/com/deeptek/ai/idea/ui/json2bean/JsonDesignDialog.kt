@@ -2,6 +2,7 @@ package com.deeptek.ai.idea.ui.json2bean
 
 import com.deeptek.ai.idea.ui.json2bean.model.JsonPropertyNode
 import com.deeptek.ai.idea.ui.json2bean.util.JsonDemoGenerator
+import com.deeptek.ai.idea.ui.json2bean.util.JsonImporter
 import com.intellij.openapi.project.Project
 import com.intellij.openapi.ui.ComboBox
 import com.intellij.openapi.ui.DialogWrapper
@@ -116,6 +117,7 @@ class JsonDesignDialog(
         val addChildBtn = com.intellij.ui.components.JBLabel("<html><a href=''>++ 添加子级</a></html>")
         val removeBtn = com.intellij.ui.components.JBLabel("<html><a href=''>- 删除节点</a></html>")
         val newJsonBtn = com.intellij.ui.components.JBLabel("<html><a href=''>✗ 新建 JSON</a></html>")
+        val pasteJsonBtn = com.intellij.ui.components.JBLabel("<html><nobr><a href=''>📋 粘贴JSON</a></nobr></html>")
         
         // 添加同级的核心逻辑（供点击和快捷键复用）
         fun doAddSibling() {
@@ -328,6 +330,16 @@ class JsonDesignDialog(
         toolbarPanel.add(newJsonBtn)
         toolbarPanel.add(JBLabel("  |  "))
         toolbarPanel.add(expandAllBtn)
+        toolbarPanel.add(JBLabel("  |  "))
+        toolbarPanel.add(pasteJsonBtn)
+
+        // 点击事件：粘贴 JSON 还原设计
+        pasteJsonBtn.setCursor(java.awt.Cursor.getPredefinedCursor(java.awt.Cursor.HAND_CURSOR))
+        pasteJsonBtn.addMouseListener(object : java.awt.event.MouseAdapter() {
+            override fun mouseClicked(e: java.awt.event.MouseEvent?) {
+                showPasteJsonDialog()
+            }
+        })
 
         val topPanel = JPanel(BorderLayout())
         topPanel.add(toolbarPanel, BorderLayout.WEST)
@@ -370,8 +382,8 @@ class JsonDesignDialog(
                 return@addActionListener
             }
             aiClassNameBtn.isEnabled = false
-            val originalText = aiClassNameBtn.text
             aiClassNameBtn.text = "⏳ 翻译中..."
+            aiClassNameBtn.toolTipText = "正在调用 AI 生成英文 Class Name..."
             
             com.intellij.openapi.application.ApplicationManager.getApplication().executeOnPooledThread {
                 kotlinx.coroutines.runBlocking {
@@ -402,18 +414,30 @@ class JsonDesignDialog(
                         javax.swing.SwingUtilities.invokeLater {
                             if (!isDisposed && className.isNotEmpty()) {
                                 classNameField.text = className
-                                aiClassNameBtn.text = "✓ $className"
+                                aiClassNameBtn.text = "AI ✓ 已生成"
+                                aiClassNameBtn.toolTipText = "已生成: $className，点击可重新生成"
                             } else {
-                                aiClassNameBtn.text = "✗ 生成失败"
+                                aiClassNameBtn.text = "AI ✗ 重试"
+                                aiClassNameBtn.toolTipText = "AI 返回内容为空，点击可重试"
                             }
                             aiClassNameBtn.isEnabled = true
                         }
                     } catch (e: Exception) {
                         javax.swing.SwingUtilities.invokeLater {
                             if (!isDisposed) {
-                                aiClassNameBtn.text = "✗ 错误"
-                                aiClassNameBtn.isEnabled = true
+                                // 提取用户可读的错误摘要
+                                val errMsg = when {
+                                    e.message?.contains("529") == true -> "服务繁忙"
+                                    e.message?.contains("429") == true -> "请求频繁"
+                                    e.message?.contains("网络连接失败") == true -> "网络失败"
+                                    e.message?.contains("overloaded") == true -> "服务过载"
+                                    e.message?.contains("timeout") == true || e.message?.contains("Timeout") == true -> "超时"
+                                    else -> "失败"
+                                }
+                                aiClassNameBtn.text = "AI ✗ $errMsg"
+                                aiClassNameBtn.toolTipText = "错误: ${e.message?.take(200) ?: "未知错误"}，点击可重试"
                             }
+                            aiClassNameBtn.isEnabled = true
                         }
                     }
                 }
@@ -452,6 +476,98 @@ class JsonDesignDialog(
         
         // 唤起 JsonToBeanService 并开启下一级 PreviewDialog
         com.deeptek.ai.idea.ui.json2bean.service.JsonToBeanService.generateJavaBeanAndPreview(project, className, demoJson, rootNode, targetDirectory)
+    }
+
+    // --- 粘贴 JSON 还原设计 ---
+
+    private fun showPasteJsonDialog() {
+        val dialog = PasteJsonDialog(project)
+        if (dialog.showAndGet()) {
+            val jsonText = dialog.getJsonText()
+            if (jsonText.isBlank()) return
+
+            try {
+                val (newRoot, isList) = JsonImporter.parseJsonToTree(jsonText)
+
+                // 替换当前 rootNode 的子节点
+                rootNode.removeAllChildren()
+                rootNode.type = newRoot.type
+                rootNode.description = newRoot.description
+
+                // 将解析出的子节点逐个挂到当前 rootNode 下
+                while (newRoot.childCount > 0) {
+                    val child = newRoot.getChildAt(0) as JsonPropertyNode
+                    newRoot.remove(0)
+                    rootNode.add(child)
+                }
+
+                // 更新 Root Type 下拉框
+                rootTypeComboBox.selectedIndex = if (isList) 1 else 0
+
+                // 刷新树
+                treeTable.tree.updateUI()
+                treeTable.updateUI()
+
+                // 延迟全部展开
+                javax.swing.SwingUtilities.invokeLater {
+                    javax.swing.SwingUtilities.invokeLater {
+                        val tree = treeTable.tree
+                        var row = 0
+                        while (row < tree.rowCount) {
+                            tree.expandRow(row)
+                            row++
+                        }
+                    }
+                }
+            } catch (e: Exception) {
+                com.intellij.openapi.ui.Messages.showErrorDialog(
+                    project,
+                    e.message ?: "未知错误",
+                    "JSON 解析失败"
+                )
+            }
+        }
+    }
+
+    /**
+     * 粘贴 JSON 的对话框，包含一个多行文本区域
+     */
+    private class PasteJsonDialog(project: Project) : DialogWrapper(project) {
+        private val textArea = javax.swing.JTextArea(20, 60)
+
+        init {
+            title = "粘贴 JSON 还原设计"
+            setOKButtonText("导入")
+            init()
+
+            // 自动读取剪贴板内容
+            try {
+                val clipboard = java.awt.Toolkit.getDefaultToolkit().systemClipboard
+                val data = clipboard.getData(java.awt.datatransfer.DataFlavor.stringFlavor) as? String
+                if (data != null && (data.trimStart().startsWith("{") || data.trimStart().startsWith("["))) {
+                    textArea.text = data
+                }
+            } catch (_: Exception) {
+                // 剪贴板不可用或内容不是文本，忽略
+            }
+        }
+
+        override fun createCenterPanel(): JComponent {
+            val panel = JPanel(BorderLayout())
+            val hint = JBLabel("将 JSON 对象或数组粘贴到下方，导入后将自动还原为设计树结构：")
+            hint.border = JBUI.Borders.emptyBottom(6)
+            panel.add(hint, BorderLayout.NORTH)
+
+            textArea.font = java.awt.Font("JetBrains Mono", java.awt.Font.PLAIN, 13)
+            textArea.tabSize = 2
+            val scrollPane = JBScrollPane(textArea)
+            scrollPane.preferredSize = Dimension(650, 400)
+            panel.add(scrollPane, BorderLayout.CENTER)
+
+            return panel
+        }
+
+        fun getJsonText(): String = textArea.text.trim()
     }
 
     // --- 列定义扩展 ---

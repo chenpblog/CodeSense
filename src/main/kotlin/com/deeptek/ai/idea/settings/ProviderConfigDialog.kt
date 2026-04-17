@@ -28,6 +28,7 @@ class ProviderConfigDialog(
 
     // UI 绑定字段
     private var selectedType: ProviderType = config.type
+    private var selectedProtocol: ApiProtocol = config.apiProtocol
     private var displayName: String = config.displayName
     private var baseUrl: String = config.baseUrl
     private var apiKey: String = config.apiKey
@@ -43,6 +44,8 @@ class ProviderConfigDialog(
     }
 
     override fun createCenterPanel(): JComponent = panel {
+        lateinit var protocolCombo: com.intellij.openapi.ui.ComboBox<String>
+        
         row("提供者类型:") {
             comboBox(ProviderType.entries.map { it.displayName })
                 .applyToComponent {
@@ -51,15 +54,31 @@ class ProviderConfigDialog(
                         val selected = selectedItem as? String ?: return@addActionListener
                         val type = ProviderType.fromDisplayName(selected)
                         selectedType = type
-                        // 如果是新增模式，自动填充默认值
+                        // 如果是新增模式或切换了类型，自动填充默认值和协议
                         if (existingConfig == null || existingConfig.type != type) {
                             displayName = type.displayName
                             baseUrl = type.defaultBaseUrl
                             modelName = type.defaultModel
+                            // 仅在切换类型时同步协议，避免覆盖用户手动选择的协议
+                            selectedProtocol = type.apiProtocol
+                            protocolCombo.selectedItem = selectedProtocol.name
                         }
                     }
                 }
                 .comment("可选: MiniMax / GLM / DeepSeek / 通义千问 / 自定义")
+        }
+
+        row("API 协议:") {
+            protocolCombo = comboBox(ApiProtocol.entries.map { it.name })
+                .applyToComponent {
+                    selectedItem = selectedProtocol.name
+                    addActionListener {
+                        val selected = selectedItem as? String ?: return@addActionListener
+                        selectedProtocol = ApiProtocol.valueOf(selected)
+                    }
+                }
+                .comment("ANTHROPIC_COMPATIBLE = x-api-key 认证，OPENAI_COMPATIBLE = Bearer Token 认证")
+                .component
         }
 
         row("显示名称:") {
@@ -119,6 +138,7 @@ class ProviderConfigDialog(
             id = config.id,
             displayName = displayName,
             type = selectedType,
+            apiProtocol = selectedProtocol,
             baseUrl = baseUrl,
             apiKey = apiKey,
             modelName = modelName,

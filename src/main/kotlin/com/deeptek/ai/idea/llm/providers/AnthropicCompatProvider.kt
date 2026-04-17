@@ -140,16 +140,16 @@ class AnthropicCompatProvider(private val config: ProviderConfig) : LlmProvider 
                             logger.info("[SSE] 第${lineCount}行原始数据: '$data'")
                         }
 
-                        // Anthropic SSE 格式:
+                        // Anthropic SSE 格式（兼容 "event: xxx" 和 "event:xxx" 两种写法）:
                         // event: content_block_delta
                         // data: {"type":"content_block_delta","index":0,"delta":{"type":"text_delta","text":"Hello"}}
                         when {
-                            data.startsWith("event: ") -> {
-                                currentEvent = data.removePrefix("event: ").trim()
+                            data.startsWith("event:") -> {
+                                currentEvent = data.removePrefix("event:").trim()
                                 if (lineCount <= 20) logger.info("[SSE] event=$currentEvent")
                             }
-                            data.startsWith("data: ") -> {
-                                val payload = data.removePrefix("data: ").trim()
+                            data.startsWith("data:") -> {
+                                val payload = data.removePrefix("data:").trim()
                                 if (payload.isEmpty()) continue
 
                                 try {
@@ -234,6 +234,13 @@ class AnthropicCompatProvider(private val config: ProviderConfig) : LlmProvider 
         }
     }
 
+    companion object {
+        /** 可重试的 HTTP 状态码：服务过载、限流、服务端临时故障 */
+        private val RETRYABLE_STATUS_CODES = setOf(429, 500, 502, 503, 529)
+        private const val MAX_RETRIES = 3
+        private const val INITIAL_DELAY_MS = 1000L
+    }
+
     override suspend fun chatCompletion(
         messages: List<ChatMessage>,
         tools: List<ToolDefinition>?,
@@ -281,57 +288,91 @@ class AnthropicCompatProvider(private val config: ProviderConfig) : LlmProvider 
         logger.info("Anthropic Non-Stream Request: model=${config.modelName}, url=${config.baseUrl}")
         logger.debug("Request body: $bodyStr")
 
-        val httpRequest = Request.Builder()
-            .url(config.baseUrl)
-            .header("x-api-key", config.apiKey)
-            .header("anthropic-version", "2023-06-01")
-            .header("Content-Type", "application/json")
-            .post(bodyStr.toRequestBody(jsonMediaType))
-            .build()
+        var lastException: Exception? = null
 
-        val response = withContext(Dispatchers.IO) { httpClient.newCall(httpRequest).execute() }
-        val responseBody = response.body?.string() ?: throw LlmException("Empty response body")
-        
-        logger.info("Anthropic Non-Stream Response code: ${response.code}")
+        for (attempt in 0..MAX_RETRIES) {
+            if (attempt > 0) {
+                val delayMs = INITIAL_DELAY_MS * (1L shl (attempt - 1)) // 指数退避: 1s, 2s, 4s
+                logger.info("Anthropic Non-Stream 第 ${attempt}/${MAX_RETRIES} 次重试, 等待 ${delayMs}ms...")
+                kotlinx.coroutines.delay(delayMs)
+            }
 
-        if (!response.isSuccessful) {
-            logger.error("Anthropic Non-Stream Error: $responseBody")
-            throw LlmException("LLM API 错误 (HTTP ${response.code})\nURL: ${config.baseUrl}\n$responseBody")
-        }
+            try {
+                val httpRequest = Request.Builder()
+                    .url(config.baseUrl)
+                    .header("x-api-key", config.apiKey)
+                    .header("anthropic-version", "2023-06-01")
+                    .header("Content-Type", "application/json")
+                    .post(bodyStr.toRequestBody(jsonMediaType))
+                    .build()
 
-        // 解析 Anthropic 响应并转换为 OpenAI 格式的 ChatResponse
-        logger.info("Anthropic Non-Stream Response body (前500字): ${responseBody.take(500)}")
-        val jsonObj = json.parseToJsonElement(responseBody).jsonObject
-        val contentArray = jsonObj["content"]?.jsonArray
-        logger.info("Anthropic content blocks 数量: ${contentArray?.size ?: 0}")
-        contentArray?.forEachIndexed { idx, block ->
-            val blockType = block.jsonObject["type"]?.jsonPrimitive?.content
-            logger.info("  content block[$idx] type=$blockType")
-        }
-        val textContent = contentArray
-            ?.filter { it.jsonObject["type"]?.jsonPrimitive?.content == "text" }
-            ?.joinToString("") { it.jsonObject["text"]?.jsonPrimitive?.content ?: "" }
-            ?: ""
-        logger.info("Anthropic Non-Stream 提取到 textContent 长度: ${textContent.length}, 前200字: ${textContent.take(200)}")
-        
-        if (textContent.isEmpty()) {
-            logger.warn("Anthropic Non-Stream textContent 为空！完整 responseBody: $responseBody")
-        }
+                val response = withContext(Dispatchers.IO) { httpClient.newCall(httpRequest).execute() }
+                val responseBody = response.body?.string() ?: throw LlmException("Empty response body")
 
-        return ChatResponse(
-            id = jsonObj["id"]?.jsonPrimitive?.content ?: "anthropic",
-            choices = listOf(
-                ChatChoice(
-                    index = 0,
-                    message = ChatMessage(
-                        role = "assistant",
-                        content = textContent
+                logger.info("Anthropic Non-Stream Response code: ${response.code}")
+
+                if (!response.isSuccessful) {
+                    if (response.code in RETRYABLE_STATUS_CODES && attempt < MAX_RETRIES) {
+                        logger.warn("Anthropic Non-Stream 可重试错误 (HTTP ${response.code}), 将进行重试: $responseBody")
+                        lastException = LlmException("LLM API 错误 (HTTP ${response.code})\nURL: ${config.baseUrl}\n$responseBody")
+                        continue
+                    }
+                    logger.error("Anthropic Non-Stream Error: $responseBody")
+                    throw LlmException("LLM API 错误 (HTTP ${response.code})\nURL: ${config.baseUrl}\n$responseBody")
+                }
+
+                // 解析 Anthropic 响应并转换为 OpenAI 格式的 ChatResponse
+                logger.info("Anthropic Non-Stream Response body (前500字): ${responseBody.take(500)}")
+                val jsonObj = json.parseToJsonElement(responseBody).jsonObject
+                val contentArray = jsonObj["content"]?.jsonArray
+                logger.info("Anthropic content blocks 数量: ${contentArray?.size ?: 0}")
+                contentArray?.forEachIndexed { idx, block ->
+                    val blockType = block.jsonObject["type"]?.jsonPrimitive?.content
+                    logger.info("  content block[$idx] type=$blockType")
+                }
+                val textContent = contentArray
+                    ?.filter { it.jsonObject["type"]?.jsonPrimitive?.content == "text" }
+                    ?.joinToString("") { it.jsonObject["text"]?.jsonPrimitive?.content ?: "" }
+                    ?: ""
+                logger.info("Anthropic Non-Stream 提取到 textContent 长度: ${textContent.length}, 前200字: ${textContent.take(200)}")
+
+                if (textContent.isEmpty()) {
+                    logger.warn("Anthropic Non-Stream textContent 为空！完整 responseBody: $responseBody")
+                }
+
+                if (attempt > 0) {
+                    logger.info("Anthropic Non-Stream 第 ${attempt} 次重试成功")
+                }
+
+                return ChatResponse(
+                    id = jsonObj["id"]?.jsonPrimitive?.content ?: "anthropic",
+                    choices = listOf(
+                        ChatChoice(
+                            index = 0,
+                            message = ChatMessage(
+                                role = "assistant",
+                                content = textContent
+                            ),
+                            finishReason = jsonObj["stop_reason"]?.jsonPrimitive?.content ?: "stop"
+                        )
                     ),
-                    finishReason = jsonObj["stop_reason"]?.jsonPrimitive?.content ?: "stop"
+                    usage = null
                 )
-            ),
-            usage = null
-        )
+            } catch (e: LlmException) {
+                lastException = e
+                throw e
+            } catch (e: java.io.IOException) {
+                lastException = e
+                if (attempt < MAX_RETRIES) {
+                    logger.warn("Anthropic Non-Stream 网络异常, 将进行重试: ${e.message}")
+                    continue
+                }
+                throw LlmException("网络连接失败 (已重试 $MAX_RETRIES 次): ${e.message}", e)
+            }
+        }
+
+        // 理论上不会走到这里，但作为兜底
+        throw lastException ?: LlmException("未知错误: 重试耗尽")
     }
 
     /**

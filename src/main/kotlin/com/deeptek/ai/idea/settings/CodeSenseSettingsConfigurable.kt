@@ -1,5 +1,8 @@
 package com.deeptek.ai.idea.settings
 
+import com.deeptek.ai.idea.llm.ChatMessage
+import com.deeptek.ai.idea.llm.LlmProviderFactory
+import com.intellij.openapi.application.ApplicationManager
 import com.intellij.openapi.options.BoundConfigurable
 import com.intellij.openapi.ui.DialogPanel
 import com.intellij.openapi.ui.Messages
@@ -18,14 +21,18 @@ class CodeSenseSettingsConfigurable : BoundConfigurable("CodeSense AI") {
 
     private val settings = CodeSenseSettings.getInstance()
 
+    // 测试连接状态：key=providerId, value=状态文字
+    private val testStatus = mutableMapOf<String, String>()
+
     // 模型列表表格
     private val tableModel = ProviderTableModel()
     private val providerTable = JBTable(tableModel).apply {
         setSelectionMode(ListSelectionModel.SINGLE_SELECTION)
         columnModel.getColumn(0).preferredWidth = 40   // ★
-        columnModel.getColumn(1).preferredWidth = 150  // 名称
-        columnModel.getColumn(2).preferredWidth = 150  // 模型
-        columnModel.getColumn(3).preferredWidth = 80   // 状态
+        columnModel.getColumn(1).preferredWidth = 140  // 名称
+        columnModel.getColumn(2).preferredWidth = 130  // 模型
+        columnModel.getColumn(3).preferredWidth = 100  // 协议
+        columnModel.getColumn(4).preferredWidth = 80   // 状态
     }
 
     override fun createPanel(): DialogPanel = panel {
@@ -92,6 +99,8 @@ class CodeSenseSettingsConfigurable : BoundConfigurable("CodeSense AI") {
             val index = settings.state.providers.indexOfFirst { it.id == selected.id }
             if (index >= 0) {
                 settings.state.providers[index] = updated
+                // 清除旧的测试状态
+                testStatus.remove(selected.id)
                 tableModel.fireTableDataChanged()
             }
         }
@@ -105,6 +114,7 @@ class CodeSenseSettingsConfigurable : BoundConfigurable("CodeSense AI") {
             Messages.getQuestionIcon()
         )
         if (result == Messages.YES) {
+            testStatus.remove(selected.id)
             settings.removeProvider(selected.id)
             tableModel.fireTableDataChanged()
         }
@@ -125,13 +135,53 @@ class CodeSenseSettingsConfigurable : BoundConfigurable("CodeSense AI") {
             )
             return
         }
-        // TODO: 调用 LlmClient 发送一个简单请求测试连接
-        Messages.showInfoMessage(
-            "连接测试功能将在 LLM 客户端实现后启用。\n" +
-            "Base URL: ${selected.baseUrl}\n" +
-            "Model: ${selected.modelName}",
-            "测试连接"
-        )
+
+        // 更新表格状态为"测试中..."
+        testStatus[selected.id] = "⏳ 测试中..."
+        tableModel.fireTableDataChanged()
+
+        ApplicationManager.getApplication().executeOnPooledThread {
+            val startTime = System.currentTimeMillis()
+            try {
+                val provider = LlmProviderFactory.create(selected)
+                val response = kotlinx.coroutines.runBlocking {
+                    provider.chatCompletion(
+                        listOf(ChatMessage.user("hi"))
+                    )
+                }
+                val elapsed = System.currentTimeMillis() - startTime
+                val content = response.content?.take(200) ?: "(空响应)"
+
+                javax.swing.SwingUtilities.invokeLater {
+                    testStatus[selected.id] = "✅ ${elapsed}ms"
+                    tableModel.fireTableDataChanged()
+                    Messages.showInfoMessage(
+                        "✅ 连接成功！\n\n" +
+                        "模型: ${selected.displayName} (${selected.modelName})\n" +
+                        "协议: ${selected.apiProtocol}\n" +
+                        "耗时: ${elapsed}ms\n\n" +
+                        "模型回复:\n$content",
+                        "测试连接 - 成功"
+                    )
+                }
+            } catch (e: Exception) {
+                val elapsed = System.currentTimeMillis() - startTime
+                val errMsg = e.message?.take(300) ?: "未知错误"
+
+                javax.swing.SwingUtilities.invokeLater {
+                    testStatus[selected.id] = "❌ 失败"
+                    tableModel.fireTableDataChanged()
+                    Messages.showErrorDialog(
+                        "❌ 连接失败\n\n" +
+                        "模型: ${selected.displayName} (${selected.modelName})\n" +
+                        "协议: ${selected.apiProtocol}\n" +
+                        "耗时: ${elapsed}ms\n\n" +
+                        "错误信息:\n$errMsg",
+                        "测试连接 - 失败"
+                    )
+                }
+            }
+        }
     }
 
     private fun getSelectedProvider(): ProviderConfig? {
@@ -146,7 +196,7 @@ class CodeSenseSettingsConfigurable : BoundConfigurable("CodeSense AI") {
     // ====== 表格模型 ======
 
     private inner class ProviderTableModel : AbstractTableModel() {
-        private val columns = arrayOf("★", "名称", "模型", "状态")
+        private val columns = arrayOf("★", "名称", "模型", "协议", "状态")
 
         override fun getRowCount(): Int = settings.state.providers.size
         override fun getColumnCount(): Int = columns.size
@@ -158,7 +208,14 @@ class CodeSenseSettingsConfigurable : BoundConfigurable("CodeSense AI") {
                 0 -> if (provider.id == settings.state.defaultProviderId) "★" else ""
                 1 -> provider.displayName
                 2 -> provider.modelName
-                3 -> if (provider.apiKey.isNotBlank()) "✔ 已配置" else "✖ 未配置"
+                3 -> when (provider.apiProtocol) {
+                    ApiProtocol.ANTHROPIC_COMPATIBLE -> "Anthropic"
+                    ApiProtocol.OPENAI_COMPATIBLE -> "OpenAI"
+                }
+                4 -> {
+                    // 优先显示测试结果状态，否则显示配置状态
+                    testStatus[provider.id] ?: if (provider.apiKey.isNotBlank()) "✔ 已配置" else "✖ 未配置"
+                }
                 else -> ""
             }
         }
