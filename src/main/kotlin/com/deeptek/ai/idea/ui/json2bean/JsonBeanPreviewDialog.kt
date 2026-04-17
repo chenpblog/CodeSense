@@ -51,7 +51,7 @@ class JsonBeanPreviewDialog(
 
     override fun createCenterPanel(): JComponent {
         val splitPaneLeft = JBSplitter(false, 0.33f)
-        splitPaneLeft.preferredSize = Dimension(1200, 600)
+        splitPaneLeft.preferredSize = Dimension(1360, 600)
         
         val splitPaneRight = JBSplitter(false, 0.5f)
 
@@ -85,6 +85,16 @@ class JsonBeanPreviewDialog(
         val bottomPanel = JPanel(BorderLayout())
         
         val buttonsPanel = JPanel(FlowLayout(FlowLayout.RIGHT))
+
+        val backBtn = JButton("← 返回")
+        backBtn.toolTipText = "关闭当前预览，返回 JSON 设计器继续编辑"
+        backBtn.addActionListener {
+            close(CANCEL_EXIT_CODE)
+            ApplicationManager.getApplication().invokeLater {
+                val designDialog = JsonDesignDialog(project, targetDirectory)
+                designDialog.show()
+            }
+        }
 
         val aiTranslateBtn = JButton("AI 转换")
         aiTranslateBtn.toolTipText = "将原 JSON 中的中文 Key 智能翻译为英文，同时合理 Mock 英文 Value"
@@ -122,6 +132,8 @@ class JsonBeanPreviewDialog(
         val closeBtn = JButton("Close")
         closeBtn.addActionListener { close(OK_EXIT_CODE) }
 
+        buttonsPanel.add(backBtn)
+        buttonsPanel.add(JBLabel(" | "))
         buttonsPanel.add(aiTranslateBtn)
         buttonsPanel.add(generateBeanBtn)
         buttonsPanel.add(JBLabel(" | "))

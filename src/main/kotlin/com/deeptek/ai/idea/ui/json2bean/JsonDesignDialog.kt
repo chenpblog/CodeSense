@@ -25,6 +25,7 @@ import javax.swing.AbstractCellEditor
 import java.awt.Component
 import javax.swing.JTable
 import javax.swing.DefaultCellEditor
+import javax.swing.JButton
 import javax.swing.JTextField
 
 class JsonDesignDialog(
@@ -95,55 +96,51 @@ class JsonDesignDialog(
 
         // 包含到 ScrollPane
         val scrollPane = JBScrollPane(treeTable)
-        scrollPane.preferredSize = Dimension(650, 400)
+        scrollPane.preferredSize = Dimension(850, 400)
 
-        // 默认全部展开
-        com.intellij.openapi.application.ApplicationManager.getApplication().invokeLater {
-            val tree = treeTable.tree
-            var row = 0
-            while (row < tree.rowCount) {
-                tree.expandRow(row)
-                row++
+        // 默认全部展开（延迟两帧确保 tree 布局完成后再展开）
+        javax.swing.SwingUtilities.invokeLater {
+            javax.swing.SwingUtilities.invokeLater {
+                val tree = treeTable.tree
+                var row = 0
+                while (row < tree.rowCount) {
+                    tree.expandRow(row)
+                    row++
+                }
             }
         }
         
         // 顶部工具栏 (Add/Remove 节点)
         val toolbarPanel = JPanel(FlowLayout(FlowLayout.LEFT))
-        val addBtn = com.intellij.ui.components.JBLabel("<html><a href=''>+ 添加同级</a></html>")
+        val addBtn = com.intellij.ui.components.JBLabel("<html><a href=''>+ 添加同级 (Enter)</a></html>")
         val addChildBtn = com.intellij.ui.components.JBLabel("<html><a href=''>++ 添加子级</a></html>")
         val removeBtn = com.intellij.ui.components.JBLabel("<html><a href=''>- 删除节点</a></html>")
         val newJsonBtn = com.intellij.ui.components.JBLabel("<html><a href=''>✗ 新建 JSON</a></html>")
         
-        // 点击事件：添加同级
-        addBtn.setCursor(java.awt.Cursor.getPredefinedCursor(java.awt.Cursor.HAND_CURSOR))
-        addBtn.addMouseListener(object : java.awt.event.MouseAdapter() {
-            override fun mouseClicked(e: java.awt.event.MouseEvent?) {
-                val path = treeTable.tree.selectionPath
-                if (path == null) {
-                    com.intellij.openapi.ui.popup.JBPopupFactory.getInstance()
-                        .createHtmlTextBalloonBuilder("请先选中一个节点", com.intellij.openapi.ui.MessageType.WARNING, null)
-                        .setFadeoutTime(2000)
-                        .createBalloon()
-                        .show(com.intellij.ui.awt.RelativePoint.getCenterOf(addBtn), com.intellij.openapi.ui.popup.Balloon.Position.below)
-                    return
-                }
-                val selectedNode = path.lastPathComponent as JsonPropertyNode
-                if (selectedNode == rootNode) {
-                    com.intellij.openapi.ui.popup.JBPopupFactory.getInstance()
-                        .createHtmlTextBalloonBuilder("不能为 Root 节点添加同级", com.intellij.openapi.ui.MessageType.WARNING, null)
-                        .setFadeoutTime(2000)
-                        .createBalloon()
-                        .show(com.intellij.ui.awt.RelativePoint.getCenterOf(addBtn), com.intellij.openapi.ui.popup.Balloon.Position.below)
-                    return
-                }
-                val parent = selectedNode.parent as JsonPropertyNode
+        // 添加同级的核心逻辑（供点击和快捷键复用）
+        fun doAddSibling() {
+            // 如果正在编辑，先提交编辑内容
+            if (treeTable.isEditing) {
+                treeTable.cellEditor.stopCellEditing()
+            }
+            val path = treeTable.tree.selectionPath
+            if (path == null) {
+                com.intellij.openapi.ui.popup.JBPopupFactory.getInstance()
+                    .createHtmlTextBalloonBuilder("请先选中一个节点", com.intellij.openapi.ui.MessageType.WARNING, null)
+                    .setFadeoutTime(2000)
+                    .createBalloon()
+                    .show(com.intellij.ui.awt.RelativePoint.getCenterOf(addBtn), com.intellij.openapi.ui.popup.Balloon.Position.below)
+                return
+            }
+            val selectedNode = path.lastPathComponent as JsonPropertyNode
+            if (selectedNode == rootNode) {
+                // Root 节点按 Enter 时视为给 Root 添加子级（更符合直觉）
                 val newNode = JsonPropertyNode("new_field", "String", "")
-                parent.add(newNode)
-                
-                val newPath = path.parentPath.pathByAddingChild(newNode)
+                rootNode.add(newNode)
+                val newPath = path.pathByAddingChild(newNode)
                 treeTable.tree.updateUI()
                 treeTable.updateUI()
-                
+                treeTable.tree.expandPath(path)
                 treeTable.tree.scrollPathToVisible(newPath)
                 com.intellij.openapi.application.ApplicationManager.getApplication().invokeLater {
                     val row = treeTable.tree.getRowForPath(newPath)
@@ -151,12 +148,49 @@ class JsonDesignDialog(
                         treeTable.selectionModel.setSelectionInterval(row, row)
                         treeTable.editCellAt(row, 0)
                         val comp = treeTable.editorComponent
-                        if (comp is javax.swing.JTextField) {
-                            comp.selectAll()
-                        }
+                        if (comp is javax.swing.JTextField) { comp.selectAll() }
                         comp?.requestFocusInWindow()
                     }
                 }
+                return
+            }
+            val parent = selectedNode.parent as JsonPropertyNode
+            val newNode = JsonPropertyNode("new_field", "String", "")
+            parent.add(newNode)
+            
+            val newPath = path.parentPath.pathByAddingChild(newNode)
+            treeTable.tree.updateUI()
+            treeTable.updateUI()
+            
+            treeTable.tree.scrollPathToVisible(newPath)
+            com.intellij.openapi.application.ApplicationManager.getApplication().invokeLater {
+                val row = treeTable.tree.getRowForPath(newPath)
+                if (row != -1) {
+                    treeTable.selectionModel.setSelectionInterval(row, row)
+                    treeTable.editCellAt(row, 0)
+                    val comp = treeTable.editorComponent
+                    if (comp is javax.swing.JTextField) {
+                        comp.selectAll()
+                    }
+                    comp?.requestFocusInWindow()
+                }
+            }
+        }
+
+        // Enter 快捷键绑定到添加同级
+        treeTable.getInputMap(javax.swing.JComponent.WHEN_ANCESTOR_OF_FOCUSED_COMPONENT)
+            .put(javax.swing.KeyStroke.getKeyStroke(java.awt.event.KeyEvent.VK_ENTER, 0), "addSibling")
+        treeTable.actionMap.put("addSibling", object : javax.swing.AbstractAction() {
+            override fun actionPerformed(e: java.awt.event.ActionEvent?) {
+                doAddSibling()
+            }
+        })
+
+        // 点击事件：添加同级
+        addBtn.setCursor(java.awt.Cursor.getPredefinedCursor(java.awt.Cursor.HAND_CURSOR))
+        addBtn.addMouseListener(object : java.awt.event.MouseAdapter() {
+            override fun mouseClicked(e: java.awt.event.MouseEvent?) {
+                doAddSibling()
             }
         })
         
@@ -322,6 +356,70 @@ class JsonDesignDialog(
         classDescField = JBTextField(savedClassDesc, 20)
         classDescField.toolTipText = "用于生成 Class 顶部的 JavaDoc 注释"
         bottomPanel.add(classDescField)
+        
+        val aiClassNameBtn = JButton("AI → Class Name")
+        aiClassNameBtn.toolTipText = "根据描述用 AI 生成英文 Class Name"
+        aiClassNameBtn.addActionListener {
+            val desc = classDescField.text.trim()
+            if (desc.isEmpty()) {
+                com.intellij.openapi.ui.popup.JBPopupFactory.getInstance()
+                    .createHtmlTextBalloonBuilder("请先填写 Class 描述", com.intellij.openapi.ui.MessageType.WARNING, null)
+                    .setFadeoutTime(2000)
+                    .createBalloon()
+                    .show(com.intellij.ui.awt.RelativePoint.getCenterOf(classDescField), com.intellij.openapi.ui.popup.Balloon.Position.above)
+                return@addActionListener
+            }
+            aiClassNameBtn.isEnabled = false
+            val originalText = aiClassNameBtn.text
+            aiClassNameBtn.text = "⏳ 翻译中..."
+            
+            com.intellij.openapi.application.ApplicationManager.getApplication().executeOnPooledThread {
+                kotlinx.coroutines.runBlocking {
+                    try {
+                        val provider = com.deeptek.ai.idea.llm.LlmProviderFactory.createDefault()
+                        val prompt = """
+                            你是一个 Java 命名专家。请根据以下中文描述，生成一个合适的 Java 类名（PascalCase 大驼峰命名法）。
+                            要求：
+                            1. 类名必须是合法的 Java 标识符
+                            2. 使用英文，PascalCase 风格
+                            3. 简洁、语义准确
+                            4. 只输出类名本身，不要任何解释、标点或多余文字
+                            
+                            中文描述：$desc
+                        """.trimIndent()
+                        
+                        val response = provider.chatCompletion(
+                            listOf(
+                                com.deeptek.ai.idea.llm.ChatMessage.system("你是一个代码命名引擎，只返回一个合法的 Java 类名，不要任何额外内容。"),
+                                com.deeptek.ai.idea.llm.ChatMessage.user(prompt)
+                            )
+                        )
+                        
+                        var className = (response.content ?: "").trim()
+                        // 清理可能的多余字符
+                        className = className.replace(Regex("[^a-zA-Z0-9_]"), "")
+                        
+                        javax.swing.SwingUtilities.invokeLater {
+                            if (!isDisposed && className.isNotEmpty()) {
+                                classNameField.text = className
+                                aiClassNameBtn.text = "✓ $className"
+                            } else {
+                                aiClassNameBtn.text = "✗ 生成失败"
+                            }
+                            aiClassNameBtn.isEnabled = true
+                        }
+                    } catch (e: Exception) {
+                        javax.swing.SwingUtilities.invokeLater {
+                            if (!isDisposed) {
+                                aiClassNameBtn.text = "✗ 错误"
+                                aiClassNameBtn.isEnabled = true
+                            }
+                        }
+                    }
+                }
+            }
+        }
+        bottomPanel.add(aiClassNameBtn)
         
         mainPanel.add(bottomPanel, BorderLayout.SOUTH)
 

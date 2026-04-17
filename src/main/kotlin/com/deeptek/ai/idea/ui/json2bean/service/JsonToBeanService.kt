@@ -22,8 +22,7 @@ object JsonToBeanService {
                 // 不使用大模型，直接在本地计算与代码生成
                 val builder = StringBuilder()
                 val innerClasses = mutableListOf<String>()
-
-                builder.append("import lombok.Data;\n\n")
+                val imports = mutableSetOf("lombok.Data")
 
                 builder.append("/**\n")
                 if (rootNode.description.isNotEmpty()) {
@@ -35,7 +34,7 @@ object JsonToBeanService {
 
                 for (i in 0 until rootNode.childCount) {
                     val child = rootNode.getChildAt(i) as JsonPropertyNode
-                    generateField(child, builder, innerClasses)
+                    generateField(child, builder, innerClasses, imports)
                 }
 
                 builder.append("\n")
@@ -47,7 +46,8 @@ object JsonToBeanService {
 
                 builder.append("}\n")
                 
-                val javaCode = builder.toString()
+                val importsBlock = imports.sorted().joinToString("\n") { "import $it;" }
+                val javaCode = importsBlock + "\n\n" + builder.toString()
 
                 ApplicationManager.getApplication().invokeLater {
                     val previewDialog = JsonBeanPreviewDialog(project, className, demoJson, javaCode, rootNode, targetDirectory)
@@ -66,7 +66,7 @@ object JsonToBeanService {
         }
     }
 
-    private fun generateField(node: JsonPropertyNode, builder: StringBuilder, innerClasses: MutableList<String>) {
+    private fun generateField(node: JsonPropertyNode, builder: StringBuilder, innerClasses: MutableList<String>, imports: MutableSet<String>) {
         val fName = node.fieldName.takeIf { it.isNotBlank() } ?: "unknownField"
         
         // 注释
@@ -78,30 +78,34 @@ object JsonToBeanService {
         }
         builder.append("     */\n")
 
-        val typeStr = resolveTypeStr(node, innerClasses)
+        val typeStr = resolveTypeStr(node, innerClasses, imports)
         builder.append("    private $typeStr $fName;\n\n")
     }
 
-    private fun resolveTypeStr(node: JsonPropertyNode, innerClasses: MutableList<String>): String {
+    private fun resolveTypeStr(node: JsonPropertyNode, innerClasses: MutableList<String>, imports: MutableSet<String>): String {
         return when (node.type) {
             "String" -> "String"
-            "Decimal" -> "java.math.BigDecimal"
+            "Decimal" -> {
+                imports.add("java.math.BigDecimal")
+                "BigDecimal"
+            }
             "Boolean" -> "Boolean"
             "Object" -> {
                 val innerName = capitalize(node.fieldName)
-                buildInnerClass(innerName, node, innerClasses)
+                buildInnerClass(innerName, node, innerClasses, imports)
                 innerName
             }
             "List<Object>" -> {
+                imports.add("java.util.List")
                 val innerName = capitalize(node.fieldName)
-                buildInnerClass(innerName, node, innerClasses)
-                "java.util.List<$innerName>"
+                buildInnerClass(innerName, node, innerClasses, imports)
+                "List<$innerName>"
             }
             else -> "String"
         }
     }
 
-    private fun buildInnerClass(className: String, node: JsonPropertyNode, innerClasses: MutableList<String>) {
+    private fun buildInnerClass(className: String, node: JsonPropertyNode, innerClasses: MutableList<String>, imports: MutableSet<String>) {
         val safeName = className.takeIf { it.isNotBlank() } ?: "InnerClass"
         val builder = StringBuilder()
         builder.append("    @Data\n")
@@ -119,7 +123,7 @@ object JsonToBeanService {
             }
             builder.append("         */\n")
             
-            val typeStr = resolveTypeStr(child, innerClasses)
+            val typeStr = resolveTypeStr(child, innerClasses, imports)
             builder.append("        private $typeStr $fName;\n\n")
         }
 
@@ -138,8 +142,7 @@ object JsonToBeanService {
 
         val builder = StringBuilder()
         val innerClasses = mutableListOf<String>()
-
-        builder.append("import lombok.Data;\n\n")
+        val imports = mutableSetOf("lombok.Data")
 
         builder.append("/**\n")
         if (rootNode.description.isNotEmpty()) {
@@ -151,7 +154,7 @@ object JsonToBeanService {
 
         for (i in 0 until cloneRoot.childCount) {
             val child = cloneRoot.getChildAt(i) as JsonPropertyNode
-            generateField(child, builder, innerClasses)
+            generateField(child, builder, innerClasses, imports)
         }
 
         builder.append("\n")
@@ -161,7 +164,9 @@ object JsonToBeanService {
         }
 
         builder.append("}\n")
-        return builder.toString()
+        
+        val importsBlock = imports.sorted().joinToString("\n") { "import $it;" }
+        return importsBlock + "\n\n" + builder.toString()
     }
 
     private fun cloneAndMergeNode(node: JsonPropertyNode, jsonElement: com.google.gson.JsonElement): JsonPropertyNode {
