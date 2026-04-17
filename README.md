@@ -63,18 +63,20 @@ src/main/kotlin/com/deeptek/ai/idea/
 
 ## 🔌 支持的 LLM 模型
 
-所有接入的模型统一采用 **Anthropic Messages API 协议** `(x-api-key 认证)`。无论是国内的高性能大模型（通过各大平台的兼容接口或转换器）还是官方 Claude，只要提供了兼容 Anthropic 的接口全部支持！
+支持 **Anthropic Messages API** 和 **OpenAI Chat Completions** 两种协议，可在每个 Provider 配置中独立选择。默认采用 Anthropic 协议。
 
-| Provider | 协议                   | 推荐模型          | 配置 Base URL 示例                                           |
-| -------- | ---------------------- | ----------------- | ------------------------------------------------------------ |
-| MiniMax  | Anthropic Messages API | MiniMax-M2.7      | `https://api.minimaxi.com/anthropic/v1/messages`             |
-| 智谱 GLM | Anthropic Messages API | glm-4.7           | `https://open.bigmodel.cn/api/anthropic/v1/messages`         |
-| DeepSeek | Anthropic Messages API | deepseek-chat     | 第三方聚合站或 API 网关提供的 Anthropic 兼容端地址           |
-| 通义千问 | Anthropic Messages API | qwen-max          | 第三方聚合站或 API 网关提供的 Anthropic 兼容端地址           |
-| Claude   | Anthropic Messages API | claude-3-5-sonnet | `https://api.anthropic.com/v1/messages`                      |
-| 自部署   | Anthropic Messages API | 任意模型          | 通常以 `/v1/messages` 或 `/chat/completions` (依赖中转) 结尾 |
+| Provider     | 推荐协议   | 推荐模型            | 配置 Base URL 示例                                               |
+| ------------ | ------------ | ------------------- | ---------------------------------------------------------------- |
+| MiniMax      | Anthropic    | MiniMax-M2.7        | `https://api.minimaxi.com/anthropic/v1/messages`                 |
+| 智谱 GLM     | OpenAI       | glm-4               | `https://open.bigmodel.cn/api/paas/v4/chat/completions`          |
+| DeepSeek     | OpenAI       | deepseek-chat       | `https://api.deepseek.com/v1/chat/completions`                   |
+| 通义千问     | OpenAI       | qwen-plus           | `https://dashscope.aliyuncs.com/compatible-mode/v1/chat/completions` |
+| 通义 Qwen3   | Anthropic    | qwen3-coder-plus    | `https://coding.dashscope.aliyuncs.com/apps/anthropic/v1/messages` |
+| Claude       | Anthropic    | claude-3-5-sonnet   | `https://api.anthropic.com/v1/messages`                          |
+| Kimi         | OpenAI       | moonshot-v1-128k    | `https://api.moonshot.cn/v1/chat/completions`                    |
+| 自定义       | 自选         | 任意模型              | 根据实际接口填写                                                 |
 
-> ⚠️ **Base URL 配置提示**：在 Settings 设置时需要填写**完整的终端地址**，切勿只填域名，**请务必在你的原有地址后面加上 `/v1/messages` 或其他实际对应的 API 终端！**
+> ⚠️ **Base URL 配置提示**：在 Settings 设置时需要填写**完整的终端地址**，切勿只填域名。Anthropic 协议地址通常以 `/v1/messages` 结尾，OpenAI 协议地址通常以 `/chat/completions` 结尾。
 
 ---
 
@@ -156,7 +158,7 @@ export JAVA_HOME=/path/to/jdk-21
 构建产物位于：
 
 ```
-build/distributions/codesense-ai-plugin-0.1.0.zip
+build/distributions/codesense-ai-plugin-0.2.1.zip
 ```
 
 这个 ZIP 文件可以直接在 IntelliJ IDEA 中安装：
@@ -169,7 +171,7 @@ build/distributions/codesense-ai-plugin-0.1.0.zip
 编辑 `gradle.properties`：
 
 ```properties
-pluginVersion = 0.2.0
+pluginVersion = 0.2.1
 ```
 
 ### 调整兼容的 IDE 版本范围
@@ -339,7 +341,31 @@ intellijPlatform {
 
 ## 📋 版本历史
 
-### v0.1.0（当前版本）
+### v0.2.1（当前版本）
+
+**📥 JSON 设计器增强**
+- ✅ 新增「📋 粘贴 JSON」功能 — 直接粘贴原始 JSON 对象/数组，自动还原为设计树
+- ✅ AI 翻译 Class Name 按钮优化 — 支持反复调用、错误状态可见（服务繁忙/网络失败/超时等）
+
+**🔄 LLM 调用健壮性**
+- ✅ 非流式请求自动重试 — 429/500/502/503/529 等瞬态错误指数退避重试（3 次，1s→2s→4s）
+- ✅ 网络 IO 异常自动重试 — 连接超时、断网等场景自动恢复
+- ✅ SSE 解析兼容性修复 — 同时支持 `data: {...}` 和 `data:{...}` 两种 SSE 格式
+
+**⚙️ 模型配置增强**
+- ✅ 新增 API 协议选择 — 每个 Provider 可独立选择 Anthropic 或 OpenAI 协议，默认 Anthropic
+- ✅ 协议列显示 — 模型列表新增「协议」列，一目了然
+- ✅ 测试连接功能 — 发送 "hi" 给模型，实时显示测试状态和模型回复
+- ✅ 修复协议配置持久化问题 — 重启 IDE 后用户选择的协议不再被重置
+
+### v0.2.0
+
+- ✅ JSON to Java Bean 设计器 — 可视化树表设计 JSON 结构，一键生成 Java Bean
+- ✅ AI 智能翻译 — 中文字段名自动翻译为英文
+- ✅ 多协议支持 — 同时支持 OpenAI 和 Anthropic 两种 API 协议
+- ✅ Chat 面板优化 — Markdown 渲染、代码高亮、流式输出
+
+### v0.1.0
 
 - ✅ 影响范围分析 — 调用链追溯 + 入口点识别 + AI 风险评估
 - ✅ 代码审查 — 基于 Git Diff 的单文件 / 全量审查

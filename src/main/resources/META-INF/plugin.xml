@@ -18,6 +18,17 @@
     ]]></description>
 
     <change-notes><![CDATA[
+    <h3>0.2.1 (2026-04-17)</h3>
+    <ul>
+        <li><b>JSON Designer</b>: 新增「📋 粘贴 JSON」功能，直接粘贴 JSON 对象/数组自动还原为设计树</li>
+        <li><b>JSON Designer</b>: AI 翻译 Class Name 按钮支持反复调用，错误状态可见（服务繁忙/网络失败/超时等）</li>
+        <li><b>LLM Robustness</b>: 非流式请求自动重试（429/500/502/503/529 指数退避重试 3 次）</li>
+        <li><b>LLM Robustness</b>: SSE 解析兼容性修复，同时支持 data: 和 data: 两种格式</li>
+        <li><b>Settings</b>: 新增 API 协议选择（Anthropic / OpenAI），每个 Provider 可独立配置</li>
+        <li><b>Settings</b>: 模型列表新增「协议」列显示</li>
+        <li><b>Settings</b>: 测试连接功能，发送 hi 给模型，显示耗时和模型回复</li>
+        <li><b>Bugfix</b>: 修复协议配置重启后被重置的问题</li>
+    </ul>
     <h3>0.2.0 (2026-04-17)</h3>
     <ul>
         <li><b>JSON Designer</b>: Enter 快捷键快速添加同级节点，提升编辑效率</li>
