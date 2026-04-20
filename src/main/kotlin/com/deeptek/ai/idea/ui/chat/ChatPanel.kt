@@ -177,6 +177,8 @@ class ChatPanel(private val project: Project) {
                 }
 
                 val responseBuilder = StringBuilder()
+                var isThinking = false
+                var hasReasoningContent = false
                 startAiMessage()
 
                 // 流式请求（降级处理）
@@ -189,7 +191,21 @@ class ChatPanel(private val project: Project) {
                             streamError = e.message ?: "未知流式错误"
                         }
                         .collect { chunk ->
+                            // 处理思考过程内容（GLM-5 等思考模型）
+                            chunk.deltaReasoningContent?.let {
+                                if (!isThinking) {
+                                    isThinking = true
+                                    appendAiChunk("<span style='color:gray;'>💭 思考中...")
+                                }
+                                // 思考内容不计入最终响应，但标记有内容返回
+                                hasReasoningContent = true
+                            }
+                            // 处理正式回复内容
                             chunk.deltaContent?.let {
+                                if (isThinking) {
+                                    isThinking = false
+                                    appendAiChunk("</span><br>")
+                                }
                                 responseBuilder.append(it)
                                 appendAiChunk(it)
                             }
@@ -216,12 +232,20 @@ class ChatPanel(private val project: Project) {
                         setStatus("回复不完整")
                     }
                     // 流正常结束但响应为空
+                    fullResponse.isEmpty() && hasReasoningContent -> {
+                        // 模型有思考过程但没产出最终回答
+                        appendErrorMessage(
+                            "模型完成了思考过程，但未生成最终回答。\n" +
+                            "这可能是因为问题过于简单或模型处理异常。\n" +
+                            "建议：请重新提问或换一种方式描述问题。"
+                        )
+                        setStatus("仅有思考过程")
+                    }
                     fullResponse.isEmpty() -> {
                         appendErrorMessage(
                             "AI 未返回有效回复内容。\n\n" +
                             "可能原因：\n" +
                             "• 当前模型 (${provider.modelName}) 返回了不兼容的响应格式\n" +
-                            "• 模型仅返回了思考过程，未生成最终回答\n" +
                             "• API 响应被截断\n\n" +
                             "建议：尝试切换模型或重新提问。"
                         )

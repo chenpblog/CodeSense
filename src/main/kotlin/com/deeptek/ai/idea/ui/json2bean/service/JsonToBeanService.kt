@@ -175,16 +175,33 @@ object JsonToBeanService {
         
         val clone = JsonPropertyNode(node.fieldName, node.type, desc)
         
-        val obj = if (jsonElement.isJsonArray && jsonElement.asJsonArray.size() > 0) {
-            jsonElement.asJsonArray.get(0).asJsonObject
-        } else if (jsonElement.isJsonObject) {
-            jsonElement.asJsonObject
-        } else {
-            return clone
+        // 尝试提取 JSON 对象（支持直接对象或数组中的第一个对象元素）
+        val obj = when {
+            jsonElement.isJsonObject -> jsonElement.asJsonObject
+            jsonElement.isJsonArray && jsonElement.asJsonArray.size() > 0 -> {
+                val firstElement = jsonElement.asJsonArray.get(0)
+                if (firstElement.isJsonObject) firstElement.asJsonObject else {
+                    logger.warn("[cloneAndMerge] 数组首元素不是 JsonObject, 跳过合并: field=${node.fieldName}")
+                    return clone
+                }
+            }
+            else -> {
+                // 基本类型或空数组，无法递归合并
+                return clone
+            }
         }
 
         val entries = obj.entrySet().toList()
-        for (i in 0 until Math.min(node.childCount, entries.size)) {
+        
+        // 日志记录数量不匹配的情况
+        if (node.childCount != entries.size) {
+            logger.warn("[cloneAndMerge] 子节点数量不匹配: field=${node.fieldName}, " +
+                "原始节点子数=${node.childCount}, 英文JSON键数=${entries.size}")
+        }
+        
+        // 安全迭代：取两者的最小值，避免 IndexOutOfBoundsException
+        val mergeCount = Math.min(node.childCount, entries.size)
+        for (i in 0 until mergeCount) {
             val child = node.getChildAt(i) as JsonPropertyNode
             val entry = entries[i]
             
@@ -193,6 +210,13 @@ object JsonToBeanService {
             childClone.fieldName = entry.key
             clone.add(childClone)
         }
+        
+        // 如果英文 JSON 有多余的键（AI 可能新增了字段），记录但不处理
+        if (entries.size > node.childCount) {
+            logger.warn("[cloneAndMerge] 英文 JSON 有 ${entries.size - node.childCount} 个多余的键未合并: " +
+                entries.drop(node.childCount).map { it.key })
+        }
+        
         return clone
     }
 }

@@ -105,6 +105,10 @@ data class ChatChunk(
     val deltaContent: String?
         get() = choices.firstOrNull()?.delta?.content
 
+    /** 获取增量思考内容（reasoning_content，GLM-5 等思考模型使用） */
+    val deltaReasoningContent: String?
+        get() = choices.firstOrNull()?.delta?.reasoningContent
+
     /** 获取增量工具调用 */
     val deltaToolCalls: List<ToolCallInfo>?
         get() = choices.firstOrNull()?.delta?.toolCalls
@@ -126,6 +130,8 @@ data class ChunkChoice(
 data class DeltaMessage(
     val role: String? = null,
     val content: String? = null,
+    @SerialName("reasoning_content")
+    val reasoningContent: String? = null,
     @SerialName("tool_calls")
     val toolCalls: List<ToolCallInfo>? = null
 )

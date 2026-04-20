@@ -288,30 +288,41 @@ class JsonBeanPreviewDialog(
                     
                     val prompt = """
                         你是一个纯粹且极度精准的 JSON 转换工具。
-                        下面附有一个 JSON，该 JSON 的键(Key)全部是中文或带中文的词句。
-                        请你把所有的 JSON 键(Key)都翻译成标准的、全称的【驼峰命名法】(camelCase) 的英文。
-                        如果 JSON 的值(Value)是一些随便填写的 mock_string、demo_string，请一并替换为符合翻译后字段含义的真实的、像模像样的英文 Mock 数据。但数值类型、由于是样例的结构，不能丢失。
-                        【严格规定】：绝对不可以改变 JSON 自身的任何层级嵌套和字典内部的先后顺序！结构必须1:1完美映射。绝对不要输出任何 markdown 标记！！！只且只能输出一个纯粹的 JSON 字符串。
-                        原始JSON：
+
+                        【任务】将下方 JSON 的所有中文 Key 翻译为英文驼峰命名(camelCase)，同时合理 Mock 英文 Value。
+
+                        【严格约束 - 违反任何一条都是失败】
+                        1. 层级结构：与原 JSON 完全一致，不可新增、删除、合并或拆分任何层级
+                        2. 键的顺序：每一层的键(Key)顺序必须与原 JSON 完全一致
+                        3. 数组元素：数组中的每个元素都必须保留，元素个数不可改变
+                        4. 值类型：数字保留为数字，字符串保留为字符串，布尔保留为布尔
+                        5. Mock 规则：如果 Value 是类似 "demo_string"、"mock_string" 等占位文本，替换为符合字段含义的真实英文样例数据。数字型的值（如 0.0）保留原值
+                        6. 输出要求：只输出纯 JSON，不要 markdown 标记（无 ```），不要任何解释文字，必须是带缩进的格式化 JSON
+
+                        【原始 JSON】
                         $jsonContent
                     """.trimIndent()
                     
                     val response = provider.chatCompletion(
                         listOf(
-                            com.deeptek.ai.idea.llm.ChatMessage.system("你是一个专业的代码和数据处理引擎，只负责按格式要求返回内容。"),
+                            com.deeptek.ai.idea.llm.ChatMessage.system("你是一个 JSON 格式转换引擎。只能输出纯 JSON，不能输出任何其他内容。"),
                             com.deeptek.ai.idea.llm.ChatMessage.user(prompt)
                         )
                     )
                     
-                    var englishJson = response.content ?: ""
-                    englishJson = englishJson.removePrefix("```json").removePrefix("```").removeSuffix("```").trim()
-                    logger.info("[AI转换] API 成功, 完整结果: $englishJson")
+                    var rawResult = response.content ?: ""
+                    logger.info("[AI转换] API 原始结果长度=${rawResult.length}, 前200字: ${rawResult.take(200)}")
 
-                    // ★ 使用 SwingUtilities.invokeLater 确保在 EDT 上更新（绕过 IntelliJ 的 invokeLater 可能的问题）
+                    // ★ 智能提取 JSON：处理 markdown 包裹、多余文字等脏数据
+                    val englishJson = extractAndFormatJson(rawResult)
+                    logger.info("[AI转换] 格式化后长度=${englishJson.length}, 前200字: ${englishJson.take(200)}")
+
+                    // ★ 结构校验：检查翻译后 JSON 的顶层键数量是否与原 JSON 一致
+                    val structureWarning = validateJsonStructure(jsonContent, englishJson)
+
                     javax.swing.SwingUtilities.invokeLater {
                         try {
                             logger.info("[AI转换] invokeLater 开始执行, 线程=${Thread.currentThread().name}")
-                            // 对话框已关闭时直接跳过所有 UI 操作
                             if (isDisposed || jsonEnglishEditor.isDisposed) {
                                 logger.info("[AI转换] 对话框或编辑器已 disposed，跳过 UI 更新")
                                 return@invokeLater
@@ -320,6 +331,8 @@ class JsonBeanPreviewDialog(
                             
                             if (englishJson.isEmpty()) {
                                 setStatus("⚠ AI 返回了空内容，请检查模型配置或重试", isError = true)
+                            } else if (structureWarning != null) {
+                                setStatus("⚠ 翻译完成，但结构可能有差异: $structureWarning", isError = true, autoClear = false)
                             } else {
                                 setStatus("✓ AI 翻译转换成功")
                             }
@@ -345,6 +358,126 @@ class JsonBeanPreviewDialog(
                         }
                     }
                 }
+            }
+        }
+    }
+
+    /**
+     * 从 AI 返回的原始文本中智能提取 JSON 并格式化
+     *
+     * 处理场景：
+     * 1. 纯 JSON
+     * 2. ```json ... ``` 包裹的 JSON
+     * 3. JSON 前后有多余解释文字
+     * 4. 多层 ``` 嵌套
+     */
+    private fun extractAndFormatJson(raw: String): String {
+        var text = raw.trim()
+        
+        // 1. 去除 markdown 代码块标记（支持 ```json, ```, 多次嵌套）
+        val codeBlockPattern = Regex("```(?:json)?\\s*\\n?(.*?)\\n?\\s*```", RegexOption.DOT_MATCHES_ALL)
+        val codeBlockMatch = codeBlockPattern.find(text)
+        if (codeBlockMatch != null) {
+            text = codeBlockMatch.groupValues[1].trim()
+        }
+        
+        // 2. 如果还有残留的 ``` 标记，逐个清理
+        text = text.removePrefix("```json").removePrefix("```").removeSuffix("```").trim()
+        
+        // 3. 尝试从文本中提取 JSON 部分（找到第一个 { 或 [ 到最后一个 } 或 ]）
+        if (!text.startsWith("{") && !text.startsWith("[")) {
+            val jsonStart = minOfNullable(text.indexOf('{'), text.indexOf('['))
+            if (jsonStart != null && jsonStart >= 0) {
+                text = text.substring(jsonStart)
+            }
+        }
+        if (!text.endsWith("}") && !text.endsWith("]")) {
+            val jsonEndBrace = text.lastIndexOf('}')
+            val jsonEndBracket = text.lastIndexOf(']')
+            val jsonEnd = maxOf(jsonEndBrace, jsonEndBracket)
+            if (jsonEnd > 0) {
+                text = text.substring(0, jsonEnd + 1)
+            }
+        }
+        
+        // 4. 使用 Gson 解析并 pretty-print 格式化
+        return try {
+            val gson = com.google.gson.GsonBuilder()
+                .setPrettyPrinting()
+                .disableHtmlEscaping()
+                .create()
+            val element = com.google.gson.JsonParser.parseString(text)
+            gson.toJson(element)
+        } catch (e: Exception) {
+            logger.warn("[AI转换] JSON 格式化失败，返回原始文本: ${e.message}")
+            text  // 格式化失败时返回提取后的原文
+        }
+    }
+    
+    /** 辅助函数：两个可能为 -1 的索引取最小正值 */
+    private fun minOfNullable(a: Int, b: Int): Int? {
+        val validA = if (a >= 0) a else null
+        val validB = if (b >= 0) b else null
+        return when {
+            validA != null && validB != null -> minOf(validA, validB)
+            validA != null -> validA
+            validB != null -> validB
+            else -> null
+        }
+    }
+
+    /**
+     * 校验翻译后 JSON 的结构是否与原 JSON 一致
+     * 
+     * 返回 null 表示结构一致，否则返回警告信息
+     */
+    private fun validateJsonStructure(originalJson: String, translatedJson: String): String? {
+        try {
+            val original = com.google.gson.JsonParser.parseString(originalJson)
+            val translated = com.google.gson.JsonParser.parseString(translatedJson)
+            
+            return compareStructure(original, translated, "$")
+        } catch (e: Exception) {
+            return "无法校验结构: ${e.message}"
+        }
+    }
+    
+    private fun compareStructure(original: com.google.gson.JsonElement, translated: com.google.gson.JsonElement, path: String): String? {
+        return when {
+            original.isJsonObject && translated.isJsonObject -> {
+                val origKeys = original.asJsonObject.keySet().toList()
+                val transKeys = translated.asJsonObject.keySet().toList()
+                if (origKeys.size != transKeys.size) {
+                    return "路径 $path: 键数量不匹配 (原始=${origKeys.size}, 翻译后=${transKeys.size})"
+                }
+                // 按位置递归检查子元素结构
+                for (i in origKeys.indices) {
+                    val origChild = original.asJsonObject.get(origKeys[i])
+                    val transChild = translated.asJsonObject.get(transKeys[i])
+                    if (transChild == null) {
+                        return "路径 $path: 翻译后缺少第${i+1}个键对应的值"
+                    }
+                    val childWarning = compareStructure(origChild, transChild, "$path.${transKeys[i]}")
+                    if (childWarning != null) return childWarning
+                }
+                null
+            }
+            original.isJsonArray && translated.isJsonArray -> {
+                val origArr = original.asJsonArray
+                val transArr = translated.asJsonArray
+                if (origArr.size() != transArr.size()) {
+                    return "路径 $path: 数组元素数量不匹配 (原始=${origArr.size()}, 翻译后=${transArr.size()})"
+                }
+                for (i in 0 until origArr.size()) {
+                    val childWarning = compareStructure(origArr[i], transArr[i], "$path[$i]")
+                    if (childWarning != null) return childWarning
+                }
+                null
+            }
+            original.isJsonPrimitive && translated.isJsonPrimitive -> null  // 基本类型不检查
+            original.isJsonNull && translated.isJsonNull -> null
+            else -> {
+                "路径 $path: 类型不匹配 (原始=${original.javaClass.simpleName}, 翻译后=${translated.javaClass.simpleName})"
             }
         }
     }

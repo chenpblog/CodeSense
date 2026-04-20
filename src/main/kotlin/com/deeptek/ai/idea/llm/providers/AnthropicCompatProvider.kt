@@ -158,8 +158,32 @@ class AnthropicCompatProvider(private val config: ProviderConfig) : LlmProvider 
 
                                     if (lineCount <= 20) logger.info("[SSE] data type=$type, keys=${jsonObj.keys}")
 
-                                    when (type) {
-                                        "content_block_delta" -> {
+                                    // 检测是否为 OpenAI 兼容格式（GLM、DeepSeek 等）
+                                    val isOpenAiFormat = jsonObj.containsKey("choices") &&
+                                        (jsonObj["object"]?.jsonPrimitive?.content == "chat.completion.chunk" || type.isEmpty())
+
+                                    when {
+                                        // ====== OpenAI 兼容格式（自动检测回退） ======
+                                        isOpenAiFormat -> {
+                                            try {
+                                                val chunk = json.decodeFromString(ChatChunk.serializer(), payload)
+                                                val deltaContent = chunk.deltaContent
+                                                val deltaReasoning = chunk.deltaReasoningContent
+                                                val finishReason = chunk.choices.firstOrNull()?.finishReason
+
+                                                if (!deltaContent.isNullOrEmpty() || !deltaReasoning.isNullOrEmpty()) {
+                                                    trySend(chunk)
+                                                }
+                                                if (finishReason == "stop") {
+                                                    if (lineCount <= 20) logger.info("[SSE] OpenAI 格式收到 finish_reason=stop")
+                                                }
+                                            } catch (e: Exception) {
+                                                // 解析 OpenAI chunk 失败时仅在前20行打印
+                                                if (lineCount <= 20) logger.warn("[SSE] OpenAI 格式解析失败: ${e.message}, payload=${payload.take(200)}")
+                                            }
+                                        }
+                                        // ====== 标准 Anthropic 格式 ======
+                                        type == "content_block_delta" -> {
                                             val delta = jsonObj["delta"]?.jsonObject
                                             val deltaType = delta?.get("type")?.jsonPrimitive?.content
                                             if (deltaType == "text_delta") {
@@ -180,14 +204,14 @@ class AnthropicCompatProvider(private val config: ProviderConfig) : LlmProvider 
                                                     ))
                                                 }
                                             } else {
-                                                logger.info("[SSE] content_block_delta 但 deltaType=$deltaType (非 text_delta), delta=$delta")
+                                                if (lineCount <= 20) logger.info("[SSE] content_block_delta 但 deltaType=$deltaType (非 text_delta)")
                                             }
                                         }
-                                        "message_stop" -> {
+                                        type == "message_stop" -> {
                                             logger.info("[SSE] 收到 message_stop, 总行数=$lineCount")
                                             break
                                         }
-                                        "error" -> {
+                                        type == "error" -> {
                                             val errorMsg = jsonObj["error"]?.jsonObject
                                                 ?.get("message")?.jsonPrimitive?.content
                                                 ?: payload
@@ -200,7 +224,9 @@ class AnthropicCompatProvider(private val config: ProviderConfig) : LlmProvider 
                                 } catch (e: LlmException) {
                                     throw e
                                 } catch (e: Exception) {
-                                    logger.warn("Failed to parse Anthropic SSE: $payload", e)
+                                    if (lineCount <= 20) {
+                                        logger.warn("Failed to parse SSE: $payload", e)
+                                    }
                                 }
                             }
                             data.isNotBlank() -> {
