@@ -18,6 +18,14 @@
     ]]></description>
 
     <change-notes><![CDATA[
+    <h3>0.2.2 (2026-04-21)</h3>
+    <ul>
+        <li><b>单元测试</b>: 新增 32 个 JUnit 5 单元测试，覆盖 JSON to Java Bean 完整链路（JsonImporter / JsonDemoGenerator / JsonToBeanService / E2E）</li>
+        <li><b>测试覆盖</b>: 嵌套数组深度解析（1~7 层）、边界场景（空 JSON、null 字段、非法 JSON、超深度限制）、业务 JSON（账户诊断入参/出参）全部覆盖</li>
+        <li><b>MindMap</b>: 修复编辑器 readonly 竞态条件，确保 Owner 能正确编辑自己的脑图</li>
+        <li><b>MindMap</b>: 根节点支持多行文字换行，防止内容截断</li>
+        <li><b>MindMap</b>: 恢复委托模式下 Tab 键添加子节点功能</li>
+    </ul>
     <h3>0.2.1 (2026-04-17)</h3>
     <ul>
         <li><b>JSON Designer</b>: 新增「📋 粘贴 JSON」功能，直接粘贴 JSON 对象/数组自动还原为设计树</li>
