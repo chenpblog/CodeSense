@@ -347,9 +347,58 @@ class AnthropicCompatProvider(private val config: ProviderConfig) : LlmProvider 
                     throw LlmException("LLM API 错误 (HTTP ${response.code})\nURL: ${config.baseUrl}\n$responseBody")
                 }
 
-                // 解析 Anthropic 响应并转换为 OpenAI 格式的 ChatResponse
+                // 解析响应：自动检测 OpenAI 格式 vs Anthropic 格式
                 logger.info("Anthropic Non-Stream Response body (前500字): ${responseBody.take(500)}")
                 val jsonObj = json.parseToJsonElement(responseBody).jsonObject
+                
+                // ====== 自动检测 OpenAI 兼容格式（GLM、DeepSeek 等） ======
+                val isOpenAiFormat = jsonObj.containsKey("choices") && 
+                    (jsonObj["object"]?.jsonPrimitive?.content == "chat.completion" || 
+                     !jsonObj.containsKey("content"))
+                
+                if (isOpenAiFormat) {
+                    // OpenAI 格式：直接反序列化
+                    logger.info("检测到 OpenAI 格式响应，使用 ChatResponse 反序列化")
+                    try {
+                        val chatResponse = json.decodeFromString(ChatResponse.serializer(), responseBody)
+                        val content = chatResponse.content ?: ""
+                        logger.info("OpenAI 格式提取 content 长度: ${content.length}, 前200字: ${content.take(200)}")
+                        
+                        if (content.isEmpty()) {
+                            logger.warn("OpenAI 格式 content 为空！完整 responseBody: $responseBody")
+                        }
+                        if (attempt > 0) {
+                            logger.info("Anthropic Non-Stream 第 ${attempt} 次重试成功")
+                        }
+                        return chatResponse
+                    } catch (e: Exception) {
+                        logger.warn("OpenAI 格式反序列化失败，回退到手动解析: ${e.message}")
+                        // 回退：手动从 choices[0].message.content 提取
+                        val choices = jsonObj["choices"]?.jsonArray
+                        val messageContent = choices?.firstOrNull()
+                            ?.jsonObject?.get("message")
+                            ?.jsonObject?.get("content")
+                            ?.jsonPrimitive?.content ?: ""
+                        logger.info("手动提取 content 长度: ${messageContent.length}")
+                        
+                        return ChatResponse(
+                            id = jsonObj["id"]?.jsonPrimitive?.content ?: "openai-compat",
+                            choices = listOf(
+                                ChatChoice(
+                                    index = 0,
+                                    message = ChatMessage(
+                                        role = "assistant",
+                                        content = messageContent
+                                    ),
+                                    finishReason = "stop"
+                                )
+                            ),
+                            usage = null
+                        )
+                    }
+                }
+                
+                // ====== 标准 Anthropic 格式解析 ======
                 val contentArray = jsonObj["content"]?.jsonArray
                 logger.info("Anthropic content blocks 数量: ${contentArray?.size ?: 0}")
                 contentArray?.forEachIndexed { idx, block ->

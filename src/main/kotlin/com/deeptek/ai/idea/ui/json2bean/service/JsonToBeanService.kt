@@ -175,20 +175,11 @@ object JsonToBeanService {
         
         val clone = JsonPropertyNode(node.fieldName, node.type, desc)
         
-        // 尝试提取 JSON 对象（支持直接对象或数组中的第一个对象元素）
-        val obj = when {
-            jsonElement.isJsonObject -> jsonElement.asJsonObject
-            jsonElement.isJsonArray && jsonElement.asJsonArray.size() > 0 -> {
-                val firstElement = jsonElement.asJsonArray.get(0)
-                if (firstElement.isJsonObject) firstElement.asJsonObject else {
-                    logger.warn("[cloneAndMerge] 数组首元素不是 JsonObject, 跳过合并: field=${node.fieldName}")
-                    return clone
-                }
-            }
-            else -> {
-                // 基本类型或空数组，无法递归合并
-                return clone
-            }
+        // 尝试提取 JSON 对象（支持直接对象、数组、嵌套数组等场景）
+        val obj = extractFirstJsonObject(jsonElement)
+        if (obj == null) {
+            logger.info("[cloneAndMerge] 无法提取 JsonObject, field=${node.fieldName}, type=${jsonElement.javaClass.simpleName}")
+            return clone
         }
 
         val entries = obj.entrySet().toList()
@@ -218,5 +209,25 @@ object JsonToBeanService {
         }
         
         return clone
+    }
+
+    /**
+     * 从 JsonElement 中递归提取第一个 JsonObject
+     *
+     * 支持场景：
+     * - 直接 JsonObject → 返回自身
+     * - [{ }] → 返回首个 Object
+     * - [[{ }]] → 递归深入嵌套数组，直到找到 Object
+     * - 基本类型 / 空数组 → 返回 null
+     */
+    private fun extractFirstJsonObject(element: com.google.gson.JsonElement, depth: Int = 0): com.google.gson.JsonObject? {
+        if (depth > 5) return null  // 防止无限递归
+        return when {
+            element.isJsonObject -> element.asJsonObject
+            element.isJsonArray && element.asJsonArray.size() > 0 -> {
+                extractFirstJsonObject(element.asJsonArray.get(0), depth + 1)
+            }
+            else -> null
+        }
     }
 }

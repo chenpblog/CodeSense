@@ -40,8 +40,10 @@ object JsonImporter {
             rootElement.isJsonArray -> {
                 val array = rootElement.asJsonArray
                 rootNode.type = "List<Object>"
-                if (array.size() > 0 && array[0].isJsonObject) {
-                    parseObject(array[0].asJsonObject, rootNode)
+                // 递归深入嵌套数组，直到找到第一个 JsonObject 推断子结构
+                val firstObject = findFirstJsonObject(array)
+                if (firstObject != null) {
+                    parseObject(firstObject, rootNode)
                 }
                 Pair(rootNode, true)
             }
@@ -95,6 +97,20 @@ object JsonImporter {
             primitive.isBoolean -> "Boolean"
             primitive.isNumber -> "Decimal"
             else -> "String"
+        }
+    }
+
+    /**
+     * 从 JsonArray 中递归查找第一个 JsonObject
+     * 支持 [{...}]、[[{...}]]、[[[{...}]]] 等多层嵌套
+     */
+    private fun findFirstJsonObject(array: JsonArray, depth: Int = 0): JsonObject? {
+        if (depth > 5 || array.size() == 0) return null
+        val first = array[0]
+        return when {
+            first.isJsonObject -> first.asJsonObject
+            first.isJsonArray -> findFirstJsonObject(first.asJsonArray, depth + 1)
+            else -> null
         }
     }
 }
