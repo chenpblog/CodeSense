@@ -2,7 +2,7 @@ package com.deeptek.ai.idea.git
 
 import com.deeptek.ai.idea.analysis.MethodInfo
 import com.intellij.lang.java.JavaLanguage
-import com.intellij.openapi.application.runReadAction
+import com.intellij.openapi.application.ReadAction
 import com.intellij.openapi.diagnostic.Logger
 import com.intellij.openapi.project.Project
 import com.intellij.psi.*
@@ -53,18 +53,18 @@ object DiffMethodExtractor {
      * 从单个 FileDiff 提取方法级变更
      */
     private fun extractMethodsFromDiff(project: Project, diff: FileDiff): List<MethodDiff> {
-        return runReadAction {
+        return ReadAction.compute<List<MethodDiff>, RuntimeException> {
             when (diff.changeType) {
                 ChangeType.ADDED -> {
                     // 新增文件：所有方法都是 ADDED
-                    val newFile = createPsiFile(project, diff.filePath, diff.newContent ?: return@runReadAction emptyList())
+                    val newFile = createPsiFile(project, diff.filePath, diff.newContent ?: return@compute emptyList())
                     val methods = extractMethodSignatures(newFile, diff.filePath)
                     methods.map { MethodDiff(it, ChangeType.ADDED) }
                 }
 
                 ChangeType.DELETED -> {
                     // 删除文件：所有方法都是 DELETED
-                    val oldFile = createPsiFile(project, diff.filePath, diff.oldContent ?: return@runReadAction emptyList())
+                    val oldFile = createPsiFile(project, diff.filePath, diff.oldContent ?: return@compute emptyList())
                     val methods = extractMethodSignatures(oldFile, diff.filePath)
                     methods.map { MethodDiff(it, ChangeType.DELETED) }
                 }
@@ -73,7 +73,7 @@ object DiffMethodExtractor {
                     // 修改文件：对比新旧方法列表
                     val oldContent = diff.oldContent ?: ""
                     val newContent = diff.newContent ?: ""
-                    if (oldContent.isBlank() && newContent.isBlank()) return@runReadAction emptyList()
+                    if (oldContent.isBlank() && newContent.isBlank()) return@compute emptyList()
 
                     val oldFile = if (oldContent.isNotBlank()) createPsiFile(project, diff.filePath, oldContent) else null
                     val newFile = if (newContent.isNotBlank()) createPsiFile(project, diff.filePath, newContent) else null
@@ -206,7 +206,7 @@ object DiffMethodExtractor {
         val paramTypes = func.valueParameters
             .joinToString(", ") { it.typeReference?.text ?: "Any" }
 
-        val document = func.containingFile?.viewProvider?.document
+        val document = func.containingFile.viewProvider.document
         val startLine = document?.getLineNumber(func.textRange.startOffset)?.plus(1) ?: 0
         val endLine = document?.getLineNumber(func.textRange.endOffset)?.plus(1) ?: startLine
 

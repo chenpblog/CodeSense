@@ -68,9 +68,9 @@ enum class ProviderType(
     ),
     GLM(
         displayName = "GLM (智谱)",
-        defaultBaseUrl = "https://open.bigmodel.cn/api/paas/v4/chat/completions",
+        defaultBaseUrl = "https://open.bigmodel.cn/api/coding/paas/v4/chat/completions",
         defaultModel = "glm-4",
-        apiProtocol = ApiProtocol.OPENAI_COMPATIBLE
+        apiProtocol = ApiProtocol.ANTHROPIC_COMPATIBLE
     ),
     DEEPSEEK(
         displayName = "DeepSeek",

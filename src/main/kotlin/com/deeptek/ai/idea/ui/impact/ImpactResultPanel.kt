@@ -1,8 +1,6 @@
 package com.deeptek.ai.idea.ui.impact
 
 import com.intellij.openapi.application.invokeLater
-import com.intellij.openapi.fileChooser.FileChooserFactory
-import com.intellij.openapi.fileChooser.FileSaverDescriptor
 import com.intellij.openapi.project.Project
 import com.intellij.ui.components.JBScrollPane
 import com.intellij.util.ui.JBUI
@@ -165,16 +163,22 @@ class ImpactResultPanel(private val project: Project, private val onClose: (() -
         Toolkit.getDefaultToolkit().systemClipboard.setContents(selection, null)
     }
 
-    @Suppress("removal", "DEPRECATION")
     private fun exportToFile() {
-        val descriptor = FileSaverDescriptor("导出影响分析报告", "保存为 Markdown 文件")
-        descriptor.withExtensionFilter("md")
-        val dialog = FileChooserFactory.getInstance().createSaveFileDialog(descriptor, project)
-        val wrapper = dialog.save("impact-analysis-report.md") ?: return
-        try {
-            wrapper.file.writeText(rawMarkdown)
-        } catch (e: Exception) {
-            showError("导出失败: ${e.message}")
+        val fileChooser = javax.swing.JFileChooser().apply {
+            dialogTitle = "导出影响分析报告"
+            selectedFile = java.io.File("impact-analysis-report.md")
+            fileFilter = javax.swing.filechooser.FileNameExtensionFilter("Markdown 文件 (*.md)", "md")
+        }
+        if (fileChooser.showSaveDialog(rootPanel) == javax.swing.JFileChooser.APPROVE_OPTION) {
+            try {
+                var file = fileChooser.selectedFile
+                if (!file.name.endsWith(".md")) {
+                    file = java.io.File(file.absolutePath + ".md")
+                }
+                file.writeText(rawMarkdown)
+            } catch (e: Exception) {
+                showError("导出失败: ${e.message}")
+            }
         }
     }
 

@@ -152,7 +152,7 @@ class CodeSenseSettingsConfigurable : BoundConfigurable("CodeSense AI") {
                 val elapsed = System.currentTimeMillis() - startTime
                 val content = response.content?.take(200) ?: "(空响应)"
 
-                javax.swing.SwingUtilities.invokeLater {
+                ApplicationManager.getApplication().invokeLater({
                     testStatus[selected.id] = "✅ ${elapsed}ms"
                     tableModel.fireTableDataChanged()
                     Messages.showInfoMessage(
@@ -163,12 +163,12 @@ class CodeSenseSettingsConfigurable : BoundConfigurable("CodeSense AI") {
                         "模型回复:\n$content",
                         "测试连接 - 成功"
                     )
-                }
+                }, com.intellij.openapi.application.ModalityState.any())
             } catch (e: Exception) {
                 val elapsed = System.currentTimeMillis() - startTime
                 val errMsg = e.message?.take(300) ?: "未知错误"
 
-                javax.swing.SwingUtilities.invokeLater {
+                ApplicationManager.getApplication().invokeLater({
                     testStatus[selected.id] = "❌ 失败"
                     tableModel.fireTableDataChanged()
                     Messages.showErrorDialog(
@@ -179,7 +179,7 @@ class CodeSenseSettingsConfigurable : BoundConfigurable("CodeSense AI") {
                         "错误信息:\n$errMsg",
                         "测试连接 - 失败"
                     )
-                }
+                }, com.intellij.openapi.application.ModalityState.any())
             }
         }
     }

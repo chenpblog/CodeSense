@@ -12,7 +12,7 @@ import com.intellij.openapi.actionSystem.ActionUpdateThread
 import com.intellij.openapi.actionSystem.AnAction
 import com.intellij.openapi.actionSystem.AnActionEvent
 import com.intellij.openapi.application.ApplicationManager
-import com.intellij.openapi.application.runReadAction
+import com.intellij.openapi.application.ReadAction
 import com.intellij.openapi.diagnostic.Logger
 import com.intellij.openapi.project.Project
 import com.intellij.openapi.ui.Messages
@@ -314,7 +314,7 @@ class AnalyzeBranchImpactAction : AnAction() {
      * 在当前项目中查找与 MethodInfo 匹配的 PsiMethod
      */
     private fun findPsiMethodInProject(project: Project, methodInfo: MethodInfo): PsiMethod? {
-        return runReadAction {
+        return ReadAction.compute<PsiMethod?, RuntimeException> {
             try {
                 val scope = GlobalSearchScope.projectScope(project)
                 val cache = PsiShortNamesCache.getInstance(project)

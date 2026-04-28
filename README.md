@@ -1,7 +1,7 @@
 # 🧠 CodeSense AI — IntelliJ IDEA 代码感知 AI 助手
 
-[![IntelliJ Platform](https://img.shields.io/badge/IntelliJ-2024.3~2026.3-blue?logo=intellij-idea)](https://www.jetbrains.com/idea/)
-[![Kotlin](https://img.shields.io/badge/Kotlin-1.9.25-purple?logo=kotlin)](https://kotlinlang.org/)
+[![IntelliJ Platform](https://img.shields.io/badge/IntelliJ-2025.3~2026.3-blue?logo=intellij-idea)](https://www.jetbrains.com/idea/)
+[![Kotlin](https://img.shields.io/badge/Kotlin-2.3.0-purple?logo=kotlin)](https://kotlinlang.org/)
 [![Java](https://img.shields.io/badge/Java-21-orange?logo=openjdk)](https://openjdk.org/)
 [![License](https://img.shields.io/badge/License-Apache%202.0-green)](LICENSE)
 
@@ -65,16 +65,16 @@ src/main/kotlin/com/deeptek/ai/idea/
 
 支持 **Anthropic Messages API** 和 **OpenAI Chat Completions** 两种协议，可在每个 Provider 配置中独立选择。默认采用 Anthropic 协议。
 
-| Provider     | 推荐协议   | 推荐模型            | 配置 Base URL 示例                                               |
-| ------------ | ------------ | ------------------- | ---------------------------------------------------------------- |
-| MiniMax      | Anthropic    | MiniMax-M2.7        | `https://api.minimaxi.com/anthropic/v1/messages`                 |
-| 智谱 GLM     | OpenAI       | glm-4               | `https://open.bigmodel.cn/api/paas/v4/chat/completions`          |
-| DeepSeek     | OpenAI       | deepseek-chat       | `https://api.deepseek.com/v1/chat/completions`                   |
-| 通义千问     | OpenAI       | qwen-plus           | `https://dashscope.aliyuncs.com/compatible-mode/v1/chat/completions` |
-| 通义 Qwen3   | Anthropic    | qwen3-coder-plus    | `https://coding.dashscope.aliyuncs.com/apps/anthropic/v1/messages` |
-| Claude       | Anthropic    | claude-3-5-sonnet   | `https://api.anthropic.com/v1/messages`                          |
-| Kimi         | OpenAI       | moonshot-v1-128k    | `https://api.moonshot.cn/v1/chat/completions`                    |
-| 自定义       | 自选         | 任意模型              | 根据实际接口填写                                                 |
+| Provider   | 推荐协议  | 推荐模型          | 配置 Base URL 示例                                                   |
+| ---------- | --------- | ----------------- | -------------------------------------------------------------------- |
+| MiniMax    | Anthropic | MiniMax-M2.7      | `https://api.minimaxi.com/anthropic/v1/messages`                     |
+| 智谱 GLM   | OpenAI    | glm-4             | `https://open.bigmodel.cn/api/coding/paas/v4/chat/completions`       |
+| DeepSeek   | OpenAI    | deepseek-chat     | `https://api.deepseek.com/v1/chat/completions`                       |
+| 通义千问   | OpenAI    | qwen-plus         | `https://dashscope.aliyuncs.com/compatible-mode/v1/chat/completions` |
+| 通义 Qwen3 | Anthropic | qwen3-coder-plus  | `https://coding.dashscope.aliyuncs.com/apps/anthropic/v1/messages`   |
+| Claude     | Anthropic | claude-3-5-sonnet | `https://api.anthropic.com/v1/messages`                              |
+| Kimi       | OpenAI    | moonshot-v1-128k  | `https://api.moonshot.cn/v1/chat/completions`                        |
+| 自定义     | 自选      | 任意模型          | 根据实际接口填写                                                     |
 
 > ⚠️ **Base URL 配置提示**：在 Settings 设置时需要填写**完整的终端地址**，切勿只填域名。Anthropic 协议地址通常以 `/v1/messages` 结尾，OpenAI 协议地址通常以 `/chat/completions` 结尾。
 
@@ -88,7 +88,7 @@ src/main/kotlin/com/deeptek/ai/idea/
 | ----------------- | --------------------------------------- |
 | **Java (JDK)**    | 21+（推荐 Amazon Corretto 21）          |
 | **Gradle**        | 8.13+（项目自带 Wrapper，无需手动安装） |
-| **IntelliJ IDEA** | 2024.3 ~ 2026.3.x                       |
+| **IntelliJ IDEA** | 2025.3 ~ 2026.3.x                      |
 
 ### 1. 克隆项目
 
@@ -158,7 +158,7 @@ export JAVA_HOME=/path/to/jdk-21
 构建产物位于：
 
 ```
-build/distributions/codesense-ai-plugin-0.2.1.zip
+build/distributions/codesense-ai-plugin-0.3.0.zip
 ```
 
 这个 ZIP 文件可以直接在 IntelliJ IDEA 中安装：
@@ -171,7 +171,7 @@ build/distributions/codesense-ai-plugin-0.2.1.zip
 编辑 `gradle.properties`：
 
 ```properties
-pluginVersion = 0.2.1
+pluginVersion = 0.3.0
 ```
 
 ### 调整兼容的 IDE 版本范围
@@ -182,14 +182,14 @@ pluginVersion = 0.2.1
 intellijPlatform {
     pluginConfiguration {
         ideaVersion {
-            sinceBuild = "243"      // 最低支持版本（2024.3）
+            sinceBuild = "253"      // 最低支持版本（2025.3）
             untilBuild = "263.*"    // 最高支持版本（2026.3.x）
         }
     }
 }
 ```
 
-> 版本号对照：`241` = 2024.1, `242` = 2024.2, `243` = 2024.3, `263` = 2026.3
+> 版本号对照：`253` = 2025.3, `261` = 2026.1, `262` = 2026.2, `263` = 2026.3
 
 ---
 
@@ -275,14 +275,14 @@ jobs:
 
 ### 常用 Gradle 命令
 
-| 命令                      | 说明                                                 |
-| ------------------------- | ---------------------------------------------------- |
-| `./gradlew build`         | 编译 + 测试                                          |
-| `./gradlew runIde`        | 启动沙箱 IDE（带插件）                               |
-| `./gradlew buildPlugin`   | 打包为可分发的 ZIP                                   |
-| `./gradlew publishPlugin` | 发布到 JetBrains Marketplace                         |
-| `./gradlew verifyPlugin`  | 验证插件兼容性（详见下方说明）                       |
-| `./gradlew clean`         | 清理构建产物                                         |
+| 命令                      | 说明                           |
+| ------------------------- | ------------------------------ |
+| `./gradlew build`         | 编译 + 测试                    |
+| `./gradlew runIde`        | 启动沙箱 IDE（带插件）         |
+| `./gradlew buildPlugin`   | 打包为可分发的 ZIP             |
+| `./gradlew publishPlugin` | 发布到 JetBrains Marketplace   |
+| `./gradlew verifyPlugin`  | 验证插件兼容性（详见下方说明） |
+| `./gradlew clean`         | 清理构建产物                   |
 
 ### 验证插件兼容性 (verifyPlugin)
 
@@ -294,14 +294,9 @@ jobs:
 intellijPlatform {
     pluginVerification {
         ides {
-            // 验证当前的开发版本（通过属性构建 "IC-2024.3"）
-            val type = providers.gradleProperty("platformType").getOrElse("IC")
+            // 2025.3 起 IC/IU 合并为统一发行版，使用 IU 产品代码
             val ver = providers.gradleProperty("platformVersion").get()
-            ide("$type-$ver")
-            
-            // 可以手动加入需要额外验证的历史或未来特定版本，格式为：<类型>-<版本>
-            // ide("IC-2024.1.4") 
-            // ide("IU-2024.2.3")
+            ide("IU-$ver")
         }
     }
 }
@@ -341,18 +336,37 @@ intellijPlatform {
 
 ## 📋 版本历史
 
-### v0.2.1（当前版本）
+### v0.3.0（当前版本）
+
+**🔧 平台升级**
+
+- ✅ IntelliJ Platform 升级至 2025.3 统一发行版（IC/IU 合并）
+- ✅ Kotlin 编译器升级至 2.3.0（匹配 Platform 2025.3 metadata）
+- ✅ kotlinx-serialization 升级至 1.8.0
+- ✅ 最低支持版本调整为 2025.3（sinceBuild = 253）
+
+**⚡ API 现代化迁移**
+
+- ✅ `runReadAction` → `ReadAction.compute`（消除过期 API 警告）
+- ✅ `FileSaverDescriptor` → 标准 `JFileChooser`（移除过期文件选择器 API）
+- ✅ `SwingUtilities.invokeLater` → `ApplicationManager.invokeLater(ModalityState.any())`（修复 Settings 嵌套对话框 Write-unsafe context 异常）
+- ✅ IntelliJ Platform Gradle Plugin `intellijIdeaCommunity()` → `intellijIdea()`（适配统一发行版）
+
+### v0.2.2
 
 **📥 JSON 设计器增强**
+
 - ✅ 新增「📋 粘贴 JSON」功能 — 直接粘贴原始 JSON 对象/数组，自动还原为设计树
 - ✅ AI 翻译 Class Name 按钮优化 — 支持反复调用、错误状态可见（服务繁忙/网络失败/超时等）
 
 **🔄 LLM 调用健壮性**
+
 - ✅ 非流式请求自动重试 — 429/500/502/503/529 等瞬态错误指数退避重试（3 次，1s→2s→4s）
 - ✅ 网络 IO 异常自动重试 — 连接超时、断网等场景自动恢复
 - ✅ SSE 解析兼容性修复 — 同时支持 `data: {...}` 和 `data:{...}` 两种 SSE 格式
 
 **⚙️ 模型配置增强**
+
 - ✅ 新增 API 协议选择 — 每个 Provider 可独立选择 Anthropic 或 OpenAI 协议，默认 Anthropic
 - ✅ 协议列显示 — 模型列表新增「协议」列，一目了然
 - ✅ 测试连接功能 — 发送 "hi" 给模型，实时显示测试状态和模型回复
