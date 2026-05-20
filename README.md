@@ -336,7 +336,20 @@ intellijPlatform {
 
 ## 📋 版本历史
 
-### v0.3.0（当前版本）
+### v0.3.1（当前版本）
+
+**🏗 Class 级别影响分析**
+
+- ✅ 影响范围分析新增 Class 级别支持 — 光标放在类名上即可分析整个类所有 public 方法的调用链和影响范围
+- ✅ 「分析影响范围」Action 智能识别光标位置 — 方法级/Class 级自动切换，无需额外菜单
+- ✅ 新增 Class 维度 Markdown 报告 — 包含类详情（注解/继承/接口）、各方法调用链、汇总入口点和 AI 风险评估
+- ✅ 新增 `ClassInfo` / `ClassImpactResult` 数据模型 — 完整描述类的元信息和分析结果
+
+**🐛 Bug 修复**
+
+- ✅ 修复调用链分析中 PSI 元素 `textOffset` 为 `-1` 时导致 `IndexOutOfBoundsException` 的问题（影响来自编译 class 文件的方法）
+
+### v0.3.0
 
 **🔧 平台升级**
 

@@ -18,6 +18,12 @@
     ]]></description>
 
     <change-notes><![CDATA[
+    <h3>0.3.1 (2026-05-20)</h3>
+    <ul>
+        <li><b>Class 级别影响分析</b>: 影响范围分析新增 Class 级别支持 — 光标放在类名上即可分析整个类所有 public 方法的调用链和影响范围</li>
+        <li><b>智能识别</b>: 「分析影响范围」Action 自动识别光标位置 — 在方法上走方法级分析，在类名上走 Class 级分析，无需额外菜单</li>
+        <li><b>Class 报告</b>: 新增 Class 维度的 Markdown 报告，包含类详情（注解/继承/接口）、各方法调用链、汇总入口点和 AI 风险评估</li>
+    </ul>
     <h3>0.3.0 (2026-04-28)</h3>
     <ul>
         <li><b>Platform Upgrade</b>: IntelliJ Platform 升级至 2025.3 统一发行版（IC/IU 合并），最低支持版本调整为 2025.3</li>
