@@ -88,6 +88,62 @@ class CallHierarchyAnalyzer(private val project: Project) {
         }
     }
 
+    /**
+     * 根据光标所在偏移量获取 PsiClass
+     *
+     * 查找光标所在位置最近的类定义。如果光标在方法内部，
+     * 应优先使用 findMethodAtCaret()；只有光标不在方法内时才回退到类级别。
+     */
+    fun findClassAtCaret(psiFile: PsiFile, offset: Int): PsiClass? {
+        return ReadAction.compute<PsiClass?, RuntimeException> {
+            val element = psiFile.findElementAt(offset)
+            PsiTreeUtil.getParentOfType(element, PsiClass::class.java)
+        }
+    }
+
+    /**
+     * 分析整个类的影响范围
+     *
+     * 遍历类中的所有 public 方法，对每个方法执行双向调用链分析，
+     * 汇总所有受影响的入口点（去重）。
+     */
+    fun analyzeClass(psiClass: PsiClass, maxDepth: Int = 10): ClassImpactResult {
+        val classInfo = ReadAction.compute<ClassInfo, RuntimeException> { psiClass.toClassInfo() }
+        logger.info("Analyzing class ${classInfo.className}, publicMethods=${classInfo.publicMethodCount}, maxDepth=$maxDepth")
+
+        // 获取所有 public 方法
+        val publicMethods = ReadAction.compute<Array<PsiMethod>, RuntimeException> {
+            psiClass.methods.filter { it.hasModifierProperty(PsiModifier.PUBLIC) }.toTypedArray()
+        }
+
+        val methodResults = mutableMapOf<MethodInfo, BidirectionalCallTree>()
+        val allEntryPoints = mutableListOf<EntryPointInfo>()
+
+        for (psiMethod in publicMethods) {
+            try {
+                val biTree = analyzeBidirectional(psiMethod, maxDepth)
+                methodResults[biTree.method] = biTree
+
+                // 收集入口点
+                val entryPoints = biTree.callerTree.collectEntryPoints()
+                allEntryPoints.addAll(entryPoints)
+            } catch (e: Exception) {
+                val methodName = ReadAction.compute<String, RuntimeException> { psiMethod.name }
+                logger.warn("Failed to analyze method $methodName in class ${classInfo.className}", e)
+            }
+        }
+
+        // 去重入口点（同一个入口方法可能被多个方法引用）
+        val uniqueEntryPoints = allEntryPoints
+            .distinctBy { "${it.method.className}.${it.method.methodName}" }
+
+        return ClassImpactResult(
+            classInfo = classInfo,
+            methodResults = methodResults,
+            allEntryPoints = uniqueEntryPoints
+        )
+    }
+
     // ====== 递归查找调用者 ======
 
     private fun findCallers(
@@ -235,12 +291,53 @@ fun PsiMethod.toMethodInfo(): MethodInfo {
         signature = "${this.name}($paramTypes)",
         filePath = file?.path ?: "",
         lineNumber = this.textOffset.let { offset ->
+            if (offset < 0) return@let 0
             this.containingFile?.viewProvider?.document?.getLineNumber(offset)?.plus(1) ?: 0
         },
         packageName = (containingClass?.qualifiedName ?: "").substringBeforeLast('.', ""),
         annotations = this.annotations.mapNotNull {
             it.qualifiedName?.substringAfterLast('.')
         },
+        docComment = docComment
+    )
+}
+
+// ====== PsiClass 扩展函数 ======
+
+/**
+ * 将 PsiClass 转换为 ClassInfo 数据模型
+ */
+fun PsiClass.toClassInfo(): ClassInfo {
+    val file = this.containingFile?.virtualFile
+
+    // 提取类级 JavaDoc 注释首行摘要
+    val docComment = this.docComment?.text?.let { raw ->
+        raw.removePrefix("/**")
+            .removeSuffix("*/")
+            .lines()
+            .map { it.trim().removePrefix("*").trim() }
+            .filter { it.isNotBlank() && !it.startsWith("@") }
+            .firstOrNull()
+            ?.take(80)
+    }
+
+    val publicMethodCount = this.methods.count { it.hasModifierProperty(PsiModifier.PUBLIC) }
+
+    return ClassInfo(
+        className = this.name ?: "Unknown",
+        qualifiedName = this.qualifiedName ?: "Unknown",
+        packageName = (this.qualifiedName ?: "").substringBeforeLast('.', ""),
+        filePath = file?.path ?: "",
+        lineNumber = this.textOffset.let { offset ->
+            if (offset < 0) return@let 0
+            this.containingFile?.viewProvider?.document?.getLineNumber(offset)?.plus(1) ?: 0
+        },
+        annotations = this.annotations.mapNotNull {
+            it.qualifiedName?.substringAfterLast('.')
+        },
+        superClassName = this.superClass?.name,
+        interfaces = this.interfaces.mapNotNull { it.name },
+        publicMethodCount = publicMethodCount,
         docComment = docComment
     )
 }

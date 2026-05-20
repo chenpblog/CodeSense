@@ -126,7 +126,8 @@ data class ImpactReport(
  */
 enum class AnalysisMode(val displayName: String) {
     GIT_DIFF("Git Diff 分支对比"),
-    SINGLE_METHOD("指定方法分析")
+    SINGLE_METHOD("指定方法分析"),
+    SINGLE_CLASS("指定类分析")
 }
 
 /**
@@ -154,3 +155,36 @@ enum class EntryPointType(val icon: String, val displayName: String) {
     EVENT_LISTENER("📡", "事件监听"),
     OTHER("⚙️", "其他顶级方法")
 }
+
+/**
+ * 类元信息
+ */
+data class ClassInfo(
+    val className: String,              // 类名
+    val qualifiedName: String,          // 完全限定名
+    val packageName: String,            // 包路径
+    val filePath: String,               // 文件路径
+    val lineNumber: Int,                // 类起始行号
+    val annotations: List<String>,      // 类级注解
+    val superClassName: String?,        // 父类名
+    val interfaces: List<String>,       // 实现的接口
+    val publicMethodCount: Int,         // 公共方法数
+    val docComment: String?             // 类级 JavaDoc 注释
+) {
+    /** 简短显示名 */
+    val displayName: String get() = className
+
+    /** 带包路径的显示名 */
+    val fullDisplayName: String get() = "$packageName.$className"
+}
+
+/**
+ * 类级别影响分析结果
+ */
+data class ClassImpactResult(
+    val classInfo: ClassInfo,
+    /** 每个公共方法的双向调用树分析 */
+    val methodResults: Map<MethodInfo, BidirectionalCallTree>,
+    /** 汇总的所有受影响入口点（已去重） */
+    val allEntryPoints: List<EntryPointInfo>
+)

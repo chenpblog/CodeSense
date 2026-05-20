@@ -191,6 +191,130 @@ object ReportGenerator {
         return sb.toString()
     }
 
+    /**
+     * 生成模式 C 报告 — 指定类分析
+     */
+    fun generateClassReport(report: ImpactReport, classResult: ClassImpactResult): String {
+        val sb = StringBuilder()
+        val now = LocalDateTime.now().format(dateFormatter)
+        val classInfo = classResult.classInfo
+
+        // 头部元信息
+        sb.appendLine("# 🏗 类影响范围分析报告")
+        sb.appendLine()
+        sb.appendLine("| 项目 | 值 |")
+        sb.appendLine("|------|---|")
+        sb.appendLine("| **分析模式** | ${report.mode.displayName} |")
+        sb.appendLine("| **目标类** | `${classInfo.className}` |")
+        sb.appendLine("| **包路径** | `${classInfo.packageName}` |")
+        sb.appendLine("| **所在文件** | `${classInfo.filePath.substringAfter("/src/")}` |")
+        sb.appendLine("| **公共方法数** | ${classInfo.publicMethodCount} |")
+        sb.appendLine("| **已分析方法数** | ${classResult.methodResults.size} |")
+        sb.appendLine("| **分析时间** | $now |")
+        sb.appendLine("| **受影响入口点** | ${report.entryPoints.size} |")
+        sb.appendLine("| **风险等级** | ${inferRiskLevel(report)} |")
+        sb.appendLine()
+        sb.appendLine("---")
+        sb.appendLine()
+
+        // 一、类详情
+        sb.appendLine("## 一、类详情")
+        sb.appendLine()
+        sb.appendLine("**完整类名：** `${classInfo.qualifiedName}`")
+        sb.appendLine()
+
+        if (classInfo.annotations.isNotEmpty()) {
+            sb.appendLine("**类注解：**")
+            classInfo.annotations.forEach { anno ->
+                sb.appendLine("- `@$anno`")
+            }
+            sb.appendLine()
+        }
+
+        if (classInfo.superClassName != null || classInfo.interfaces.isNotEmpty()) {
+            sb.appendLine("**继承/实现：**")
+            classInfo.superClassName?.let {
+                if (it != "Object") sb.appendLine("- 父类：`$it`")
+            }
+            if (classInfo.interfaces.isNotEmpty()) {
+                sb.appendLine("- 接口：${classInfo.interfaces.joinToString(", ") { "`$it`" }}")
+            }
+            sb.appendLine()
+        }
+
+        if (!classInfo.docComment.isNullOrBlank()) {
+            sb.appendLine("**类说明：** ${classInfo.docComment}")
+            sb.appendLine()
+        }
+
+        sb.appendLine("---")
+        sb.appendLine()
+
+        // 二、各方法调用链分析
+        sb.appendLine("## 二、各方法调用链分析")
+        sb.appendLine()
+
+        if (classResult.methodResults.isEmpty()) {
+            sb.appendLine("*该类没有 public 方法，或所有方法分析均失败。*")
+            sb.appendLine()
+        } else {
+            classResult.methodResults.entries.forEachIndexed { index, (method, biTree) ->
+                sb.appendLine("### 2.${index + 1} ${method.methodName}(${method.signature.substringAfter('(')})")
+                sb.appendLine()
+
+                // 向上调用链
+                sb.appendLine("**向上调用链（谁调用了我）：**")
+                sb.appendLine()
+                sb.appendLine("```")
+                renderCallerTree(sb, biTree.callerTree, method, 0)
+                sb.appendLine("```")
+                sb.appendLine()
+
+                // 向上调用链总结表
+                val chains = biTree.callerTree.collectChainTrees()
+                if (chains.isNotEmpty() && !(chains.size == 1 && chains[0].size == 1)) {
+                    sb.appendLine("**调用链总结：**")
+                    sb.appendLine()
+                    sb.appendLine("| 链路编号 | 链路深度 | 最上层调用者 | 入口类型 |")
+                    sb.appendLine("|--------|--------|------------|---------|")
+                    chains.forEachIndexed { chainIndex, path ->
+                        val topNode = path.last()
+                        val entryType = if (topNode.isEntryPoint) {
+                            topNode.entryPointInfo?.type?.displayName ?: EntryPointType.OTHER.displayName
+                        } else {
+                            EntryPointType.OTHER.displayName
+                        }
+                        sb.appendLine("| ${chainIndex + 1} | ${path.size - 1} | `${topNode.method.displayName}` | $entryType |")
+                    }
+                    sb.appendLine()
+                }
+            }
+        }
+
+        sb.appendLine("---")
+        sb.appendLine()
+
+        // 三、受影响入口点汇总
+        generateEntryPointTable(sb, report)
+
+        // 四、AI 分析与建议
+        sb.appendLine("## 四、AI 分析与建议")
+        sb.appendLine()
+        if (report.aiSummary != null) {
+            sb.appendLine(report.aiSummary)
+        } else {
+            sb.appendLine("*AI 分析将在分析完成后自动生成...*")
+        }
+        sb.appendLine()
+        sb.appendLine("---")
+        sb.appendLine()
+
+        // 五、分析元信息
+        generateMetadata(sb, report)
+
+        return sb.toString()
+    }
+
     // ====== 通用渲染辅助 ======
 
     private fun generateEntryPointTable(sb: StringBuilder, report: ImpactReport) {
