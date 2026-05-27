@@ -26,11 +26,14 @@ object ThemeAwareCss {
     private val aiMsgBg get() = if (isDark) "#1e1e1e" else "#f5f5f5"
     private val toolMsgBg get() = if (isDark) "#3d2e1e" else "#fff3e0"
     private val toolBorderColor get() = if (isDark) "#e69500" else "#ff9800"
+    private val thinkingMsgBg get() = if (isDark) "#252933" else "#f3f6fb"
+    private val thinkingBorderColor get() = if (isDark) "#5c6f91" else "#9aaecf"
 
     // 角色颜色
     private val userRoleColor get() = if (isDark) "#64b5f6" else "#1565c0"
     private val aiRoleColor get() = if (isDark) "#81c784" else "#2e7d32"
     private val toolRoleColor get() = if (isDark) "#ffb74d" else "#e65100"
+    private val thinkingRoleColor get() = if (isDark) "#9fb3d9" else "#4b638b"
     private val errorColor get() = if (isDark) "#ef5350" else "#c62828"
 
     // 代码块
@@ -70,12 +73,18 @@ object ThemeAwareCss {
             ss.addRule(".user-msg { background: $userMsgBg; padding: 8px; margin: 6px 0; }")
             ss.addRule(".ai-msg { background: $aiMsgBg; padding: 8px; margin: 6px 0; }")
             ss.addRule(".tool-msg { background: $toolMsgBg; padding: 6px; margin: 4px 0; border-width: 0 0 0 3; border-style: solid; border-color: $toolBorderColor; font-size: 11pt; }")
+            ss.addRule(".thinking-msg { background: $thinkingMsgBg; padding: 6px; margin: 6px 0; border-width: 0 0 0 3; border-style: solid; border-color: $thinkingBorderColor; font-size: 11pt; color: $mutedColor; }")
             ss.addRule(".role { font-weight: bold; color: $userRoleColor; margin-bottom: 4px; }")
             ss.addRule(".ai-role { font-weight: bold; color: $aiRoleColor; margin-bottom: 4px; }")
             ss.addRule(".tool-role { font-weight: bold; color: $toolRoleColor; margin-bottom: 4px; }")
+            ss.addRule(".thinking-role { font-weight: bold; color: $thinkingRoleColor; margin-bottom: 4px; }")
             ss.addRule(".error { color: $errorColor; font-weight: bold; }")
             ss.addRule("pre { background: $preBg; color: $preFg; padding: 10px; }")
             ss.addRule("code { background: $codeBg; padding: 2px; font-family: monospace; }")
+            ss.addRule("h1, h2, h3, h4 { margin: 8px 0 4px 0; }")
+            ss.addRule("table { width: 100%; margin: 6px 0; }")
+            ss.addRule("td { padding: 4px; border-width: 1; border-style: solid; border-color: $tdBorder; }")
+            ss.addRule("ul { margin-top: 4px; margin-bottom: 4px; }")
         }
     }
 

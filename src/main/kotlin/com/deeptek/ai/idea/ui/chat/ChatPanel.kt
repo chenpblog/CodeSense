@@ -21,7 +21,6 @@ import java.awt.Font
 import java.awt.event.KeyAdapter
 import java.awt.event.KeyEvent
 import javax.swing.*
-import javax.swing.text.html.HTMLEditorKit
 
 /**
  * Chat 面板 — 支持普通对话 + Agent 模式
@@ -177,7 +176,6 @@ class ChatPanel(private val project: Project) {
                 }
 
                 val responseBuilder = StringBuilder()
-                var isThinking = false
                 var hasReasoningContent = false
                 startAiMessage()
 
@@ -193,19 +191,11 @@ class ChatPanel(private val project: Project) {
                         .collect { chunk ->
                             // 处理思考过程内容（GLM-5 等思考模型）
                             chunk.deltaReasoningContent?.let {
-                                if (!isThinking) {
-                                    isThinking = true
-                                    appendAiChunk("<span style='color:gray;'>💭 思考中...")
-                                }
-                                // 思考内容不计入最终响应，但标记有内容返回
                                 hasReasoningContent = true
+                                appendThinkingChunk(it)
                             }
                             // 处理正式回复内容
                             chunk.deltaContent?.let {
-                                if (isThinking) {
-                                    isThinking = false
-                                    appendAiChunk("</span><br>")
-                                }
                                 responseBuilder.append(it)
                                 appendAiChunk(it)
                             }
@@ -290,7 +280,7 @@ class ChatPanel(private val project: Project) {
                 executor.execute(text, agentContext!!).collect { event ->
                     when (event) {
                         is AgentEvent.Thinking -> {
-                            appendToolMessage("💭 思考", event.text)
+                            appendThinkingChunk(event.text)
                         }
                         is AgentEvent.ToolCallStart -> {
                             appendToolMessage("🔧 调用工具", "${event.toolName}(${event.arguments.take(100)}...)")
@@ -346,30 +336,38 @@ class ChatPanel(private val project: Project) {
     private fun appendToolMessage(label: String, content: String) {
         val escaped = content.replace("<", "&lt;").replace(">", "&gt;").replace("\n", "<br>")
         htmlContent.append("""<div class="tool-msg"><div class="tool-role">$label</div>$escaped</div>""")
-        refreshDisplay(force = true)
+        refreshDisplay(withCurrentAi = true, force = true)
     }
 
-    private var currentAiHtml = StringBuilder()
+    private var currentAiMarkdown = StringBuilder()
+    private var currentThinkingMarkdown = StringBuilder()
 
     private fun startAiMessage() {
-        currentAiHtml = StringBuilder()
+        currentAiMarkdown = StringBuilder()
+        currentThinkingMarkdown = StringBuilder()
     }
 
     private fun appendAiChunk(content: String) {
-        currentAiHtml.append(content.replace("<", "&lt;").replace(">", "&gt;").replace("\n", "<br>"))
+        currentAiMarkdown.append(content)
+        refreshDisplay(withCurrentAi = true)
+    }
+
+    private fun appendThinkingChunk(content: String) {
+        currentThinkingMarkdown.append(content)
         refreshDisplay(withCurrentAi = true)
     }
 
     private fun finishAiMessage() {
-        if (currentAiHtml.isNotEmpty()) {
-            htmlContent.append("""<div class="ai-msg"><div class="ai-role">🤖 CodeSense AI</div>$currentAiHtml</div>""")
-            currentAiHtml = StringBuilder()
+        if (currentAiMarkdown.isNotEmpty() || currentThinkingMarkdown.isNotEmpty()) {
+            htmlContent.append(renderAiMessage(currentAiMarkdown.toString(), currentThinkingMarkdown.toString()))
+            currentAiMarkdown = StringBuilder()
+            currentThinkingMarkdown = StringBuilder()
             refreshDisplay(force = true)
         }
     }
 
     private fun appendErrorMessage(error: String) {
-        htmlContent.append("""<div class="ai-msg"><div class="error">⚠️ 错误</div>${error.replace("<", "&lt;")}</div>""")
+        htmlContent.append("""<div class="ai-msg"><div class="error">⚠️ 错误</div>${markdownToHtml(error)}</div>""")
         refreshDisplay(force = true)
     }
 
@@ -387,8 +385,8 @@ class ChatPanel(private val project: Project) {
         lastRefreshTime = now
 
         invokeLater {
-            val aiPart = if (actuallyWithAi && currentAiHtml.isNotEmpty()) {
-                """<div class="ai-msg"><div class="ai-role">🤖 CodeSense AI</div>$currentAiHtml</div>"""
+            val aiPart = if (actuallyWithAi && (currentAiMarkdown.isNotEmpty() || currentThinkingMarkdown.isNotEmpty())) {
+                renderAiMessage(currentAiMarkdown.toString(), currentThinkingMarkdown.toString())
             } else ""
 
             messageDisplay.text = buildHtml("""
@@ -400,6 +398,148 @@ class ChatPanel(private val project: Project) {
     }
 
     private fun buildHtml(body: String) = "<html><body><div style='padding:8px;'>$body</div></body></html>"
+
+    private fun renderAiMessage(markdown: String, thinking: String = ""): String {
+        val thinkingHtml = if (thinking.isNotBlank()) {
+            """
+            <div class="thinking-msg">
+                <div class="thinking-role">💭 Thinking</div>
+                ${markdownToHtml(thinking)}
+            </div>
+            """.trimIndent()
+        } else ""
+        val answerHtml = if (markdown.isNotBlank()) markdownToHtml(markdown) else ""
+        return """<div class="ai-msg"><div class="ai-role">🤖 CodeSense AI</div>$thinkingHtml$answerHtml</div>"""
+    }
+
+    private fun markdownToHtml(markdown: String): String {
+        val html = StringBuilder()
+        var inCodeBlock = false
+        var inTable = false
+        var inList = false
+        var codeLanguage = ""
+
+        fun closeTableIfNeeded() {
+            if (inTable) {
+                html.appendLine("</table>")
+                inTable = false
+            }
+        }
+
+        fun closeListIfNeeded() {
+            if (inList) {
+                html.appendLine("</ul>")
+                inList = false
+            }
+        }
+
+        for (rawLine in markdown.split("\n")) {
+            val line = rawLine.trimEnd()
+            val trimmed = line.trim()
+
+            when {
+                trimmed.startsWith("```") -> {
+                    closeTableIfNeeded()
+                    closeListIfNeeded()
+                    if (inCodeBlock) {
+                        html.appendLine("</code></pre>")
+                    } else {
+                        codeLanguage = trimmed.removePrefix("```").trim()
+                        val languageClass = if (codeLanguage.isNotEmpty()) " class=\"language-${escapeHtml(codeLanguage)}\"" else ""
+                        html.appendLine("<pre><code$languageClass>")
+                    }
+                    inCodeBlock = !inCodeBlock
+                }
+                inCodeBlock -> {
+                    html.appendLine(escapeHtml(rawLine))
+                }
+                trimmed.startsWith("# ") -> {
+                    closeTableIfNeeded()
+                    closeListIfNeeded()
+                    html.appendLine("<h1>${processInline(trimmed.removePrefix("# "))}</h1>")
+                }
+                trimmed.startsWith("## ") -> {
+                    closeTableIfNeeded()
+                    closeListIfNeeded()
+                    html.appendLine("<h2>${processInline(trimmed.removePrefix("## "))}</h2>")
+                }
+                trimmed.startsWith("### ") -> {
+                    closeTableIfNeeded()
+                    closeListIfNeeded()
+                    html.appendLine("<h3>${processInline(trimmed.removePrefix("### "))}</h3>")
+                }
+                trimmed.startsWith("#### ") -> {
+                    closeTableIfNeeded()
+                    closeListIfNeeded()
+                    html.appendLine("<h4>${processInline(trimmed.removePrefix("#### "))}</h4>")
+                }
+                trimmed == "---" || trimmed == "***" -> {
+                    closeTableIfNeeded()
+                    closeListIfNeeded()
+                    html.appendLine("<hr/>")
+                }
+                trimmed.startsWith("|") && trimmed.endsWith("|") -> {
+                    closeListIfNeeded()
+                    if (!inTable) {
+                        html.appendLine("<table>")
+                        inTable = true
+                    }
+                    if (!trimmed.matches(Regex("^\\|?\\s*:?-{3,}:?\\s*(\\|\\s*:?-{3,}:?\\s*)+\\|?$"))) {
+                        val cells = trimmed.trim('|').split("|").map { it.trim() }
+                        html.append("<tr>")
+                        cells.forEach { cell -> html.append("<td>${processInline(cell)}</td>") }
+                        html.appendLine("</tr>")
+                    }
+                }
+                trimmed.startsWith("- ") || trimmed.startsWith("* ") -> {
+                    closeTableIfNeeded()
+                    if (!inList) {
+                        html.appendLine("<ul>")
+                        inList = true
+                    }
+                    html.appendLine("<li>${processInline(trimmed.drop(2))}</li>")
+                }
+                trimmed.isBlank() -> {
+                    closeTableIfNeeded()
+                    closeListIfNeeded()
+                    html.appendLine("<br/>")
+                }
+                else -> {
+                    closeTableIfNeeded()
+                    closeListIfNeeded()
+                    html.appendLine("<p>${processInline(line)}</p>")
+                }
+            }
+        }
+
+        if (inCodeBlock) html.appendLine("</code></pre>")
+        closeTableIfNeeded()
+        closeListIfNeeded()
+
+        return html.toString()
+    }
+
+    private fun processInline(text: String): String {
+        var result = escapeHtml(text)
+        result = Regex("`([^`]+)`").replace(result) { "<code>${it.groupValues[1]}</code>" }
+        result = Regex("\\*\\*(.+?)\\*\\*").replace(result) { "<b>${it.groupValues[1]}</b>" }
+        result = Regex("__(.+?)__").replace(result) { "<b>${it.groupValues[1]}</b>" }
+        result = Regex("(?<!\\*)\\*([^*]+)\\*(?!\\*)").replace(result) { "<em>${it.groupValues[1]}</em>" }
+        result = Regex("\\[([^\\]]+)]\\(([^)]+)\\)").replace(result) {
+            val label = it.groupValues[1]
+            val url = it.groupValues[2]
+            "<a href=\"$url\">$label</a>"
+        }
+        return result
+    }
+
+    private fun escapeHtml(text: String): String {
+        return text
+            .replace("&", "&amp;")
+            .replace("<", "&lt;")
+            .replace(">", "&gt;")
+            .replace("\"", "&quot;")
+    }
 
     private fun setStatus(text: String) { invokeLater { statusLabel.text = text } }
 
