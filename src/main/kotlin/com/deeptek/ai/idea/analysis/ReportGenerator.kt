@@ -1,6 +1,6 @@
 package com.deeptek.ai.idea.analysis
 
-import com.intellij.ide.plugins.PluginManagerCore
+import com.intellij.ide.plugins.PluginManager
 import com.intellij.openapi.extensions.PluginId
 import java.time.LocalDateTime
 import java.time.format.DateTimeFormatter
@@ -377,7 +377,7 @@ object ReportGenerator {
      */
     private fun getPluginVersion(): String {
         return try {
-            PluginManagerCore.getPlugin(PluginId.getId("com.deeptek.ai.idea"))?.version ?: "unknown"
+            PluginManager.getInstance().findEnabledPlugin(PluginId.getId("com.deeptek.ai.idea"))?.version ?: "unknown"
         } catch (e: Exception) {
             "unknown"
         }

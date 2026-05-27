@@ -4,7 +4,7 @@
 
 ### 1. 插件版本硬编码
 - `ReportGenerator.kt` 第 233 行硬编码 `"CodeSense AI v0.1.0"`
-- **修复**: 通过 `PluginManagerCore.getPlugin()` 动态读取插件版本
+- **修复**: 通过公开 API `PluginManager.getInstance().findEnabledPlugin()` 动态读取插件版本
 
 ### 2. LLM 模型名称
 - 当前 `report.metadata["llmModel"]` 存储的是 `displayName`（如 "GLM (智谱)"）
